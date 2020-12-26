@@ -33,7 +33,15 @@ model.custom_build()
 #model.summary()
 model.fit()
 #import matplotlib.pyplot as plt
-#for image, *labels in ds.train_ds.batch(1).take(30):
+#import time 
+#avg = 0
+#start = time.time()
+#for image, *labels in ds.train_ds.take(200).batch(1):
+#    print(image.shape)
+#    avg += time.time()-start
+#    start=time.time()
+#
+#print(avg/200)
 #    tf.print(image.shape)
 #    for label in labels:
 #        tf.print(label.shape)

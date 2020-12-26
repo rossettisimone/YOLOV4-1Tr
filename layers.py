@@ -11,6 +11,7 @@ import tensorflow as tf
 import config as cfg
 from utils import decode_delta_map
 
+
 class BatchNormalization(tf.keras.layers.BatchNormalization):
     def call(self, x, training=False):
         if not training:

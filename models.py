@@ -70,11 +70,11 @@ class tracker(tf.keras.Model):
             self.nID =  self.ds.nID
             self.epochs = cfg.EPOCHS
             self.epoch = 0
-            self.step_trains = self.epochs * len(self.ds.train_list)
             self.step_train = 0
             self.step_val = 0
             self.batch = cfg.BATCH
-            self.steps_per_epoch = 1000
+            self.steps_per_epoch = cfg.STEPS_PER_EPOCH
+            self.step_trains = self.epochs * self.steps_per_epoch * self.batch
         self.freeze_bkbn = freeze_bkbn
         self.freeze_bn = freeze_bn
         self.LEVELS = cfg.LEVELS
@@ -83,12 +83,13 @@ class tracker(tf.keras.Model):
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.emb_dim = cfg.EMB_DIM 
         self.writer = tf.summary.create_file_writer(cfg.SUMMARY_LOGDIR)
-        self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1 else 1
+        self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
         self.SmoothL1Loss = tf.keras.losses.Huber(delta=1.0)
         self.CrossEntropyLoss = tf.keras.losses.SparseCategoricalCrossentropy()
         self.CrossEntropyLossLogits = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)#
-        
+#        self.strategy = tf.distribute.MirroredStrategy()
+
         #BKBN
         self.bkbn = cspdarknet53()
         #FPN
@@ -97,7 +98,7 @@ class tracker(tf.keras.Model):
         self.head = yolov3()
         
         self.classifier = tf.keras.layers.Dense(self.nID) if self.nID>0 else None
-        self.classifier.build((None,self.emb_dim))
+        self.classifier.build((tf.newaxis,self.emb_dim))
         self.s_c = tf.Variable(initial_value=[-4.15], trainable=True) 
         self.s_r = tf.Variable(initial_value=[-4.85], trainable=True)
         self.s_id = tf.Variable(initial_value=[-2.3], trainable=True)
@@ -107,7 +108,7 @@ class tracker(tf.keras.Model):
         n = self.neck(b, training)
         h = self.head(n, training, inferring)
         return h
-
+    
     def train_step(self, data):
         self.step_train += 1
         training = True
@@ -136,7 +137,7 @@ class tracker(tf.keras.Model):
                      "mean_id_loss: %4.2f   mean_total_loss: %4.2f" % (self.step_train, self.step_trains, \
                                                              self.optimizer.lr.numpy(), self.mean_box_loss, \
                                                              self.mean_conf_loss, self.mean_id_loss, self.mean_total_loss))
-        
+#    @tf.function
     def compute_loss(self, label, pred, emb, training):
 #        pred = tf.transpose(tf.reshape(pred, [pred.shape[0], pred.shape[1], pred.shape[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS + 5]), perm = [0, 3, 1, 2, 4])  # prediction        
         pbox = pred[..., :4]
@@ -145,28 +146,21 @@ class tracker(tf.keras.Model):
         tconf = label[...,4]
         tids = label[...,5:6]
 #        tmask = label[..., 6]
-        mask = tconf > 0
-#        tf.print(tbox[mask],pbox[mask])
+        mask = tconf>0
+#        mask = tf.where(tf.greater(tconf, 0.0))
         lbox = self.SmoothL1Loss(tbox[mask],pbox[mask])
-        tconf = tf.where(tf.less(tconf, 0), 0, tconf)
-        pconf = tf.where(tf.less(tconf[...,None], 0), 0, pconf)
+        tconf = tf.where(tf.less(tconf, 0.0), 0.0, tconf)
+        pconf = tf.where(tf.less(tconf[...,tf.newaxis], 0.0), 0.0, pconf)
         lconf =  self.CrossEntropyLoss(tconf,pconf)
         emb_mask = tf.cast(tf.math.reduce_max(tf.cast(mask, tf.float32), axis=1), tf.bool)
         tids = tf.math.reduce_max(tids, axis=1)
         tids = tids[emb_mask]
         embedding = emb[emb_mask]
-        embedding = self.emb_scale * tf.keras.utils.normalize(embedding)
+        embedding = self.emb_scale * tf.math.l2_normalize(embedding,axis=1, epsilon=1e-12)
         logits = self.classifier(embedding)
-        tids = tf.where(tf.less(tids, 0), 0, tids)
-        logits = tf.where(tf.less(tids, 0), 0, logits)
-#        tf.print(tf.squeeze(tids).shape,logits.shape)
-#        tf.print(tf.squeeze(tids).shape)
-#        tf.print(logits.shape)
-#        tf.print(tf.squeeze(tids))
-#        tf.print(logits)
-#        tf.print(logits)
+        tids = tf.where(tf.less(tids, 0.0), 0.0, tids)
+        logits = tf.where(tf.less(tids, 0.0), 0.0, logits)
         lid = self.CrossEntropyLossLogits(tf.squeeze(tids),logits)
-#        tf.print(lid)
         self.classifier_summary(embedding, training)
         loss = tf.math.exp(-self.s_r)*lbox + tf.math.exp(-self.s_c)*lconf + tf.math.exp(-self.s_id)*lid + (self.s_r + self.s_c + self.s_id)
         loss *= 0.5
@@ -196,7 +190,6 @@ class tracker(tf.keras.Model):
                      "mean_id_loss: %4.2f   mean_total_loss: %4.2f" % (self.step_val, self.mean_box_loss, \
                                                              self.mean_conf_loss, self.mean_id_loss, \
                                                              self.mean_total_loss))
-        
     def fit(self, epochs = None, start_epoch = 0):
         assert self.ds is not None, 'please pass a DataLoader'
         if epochs is not None:
@@ -254,9 +247,6 @@ class tracker(tf.keras.Model):
 #            detections = []
             tf.print('None')
             
-
-
-
     def loss_summary(self, training):
         with self.writer.as_default():
             scope = 'train' if training else 'val'
@@ -330,10 +320,10 @@ class tracker(tf.keras.Model):
         tf.keras.utils.plot_model(self.bkbn.model, to_file='cspdarknet53.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
         tf.keras.utils.plot_model(self.neck.build_graph(), to_file='pan.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
         tf.keras.utils.plot_model(self.head.build_graph(), to_file='yolov3.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
-
+        
     def custom_build(self):
-        self.build((None, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
-          
+        self.build((tf.newaxis, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+         
     def adapt_lr(self):
         if self.epoch < self.epochs * 0.5 :
             lr = cfg.LR
