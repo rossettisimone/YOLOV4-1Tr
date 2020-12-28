@@ -1,0 +1,10 @@
+logdir/*
+checkpoint*
+tracker_weights*
+yolov4.weights
+__pycache__/*
+*.weights
+/logdir
+/__pycache__
+
+
