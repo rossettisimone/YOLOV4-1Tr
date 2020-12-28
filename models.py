@@ -9,7 +9,7 @@ import config as cfg
 from backbone import cspdarknet53
 from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode
 from PIL import Image, ImageDraw, ImageFont
-    
+import gc
     
 #class SoftmaxLoss(tf.keras.losses.Loss):
 #  def call(self, y_true, y_pred):
@@ -220,9 +220,11 @@ class tracker(tf.keras.Model):
             self.adapt_lr()
             for data in self.train_ds.take(self.steps_per_epoch*self.batch).batch(self.batch):
                 self.train_step(data)
+            self.save('./tracker_weights_'+str(self.epoch)+'.tf')
+            gc.collect()
             for data in self.val_ds.take(100*self.batch).batch(self.batch):
                 self.test_step(data)               
-            self.save('./tracker_weights_'+str(self.epoch)+'.tf')
+            gc.collect()
     
     def infer(self, image):
         training = True
