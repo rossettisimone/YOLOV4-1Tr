@@ -3,6 +3,8 @@
 # ANNOTATION_PATH = "/home/temir/Documents/AVA/Dataset/prova.json"
 #import numpy as np
 GPU = '0'
+DATASET_TYPE = 'ava'
+
 # AVA_path 
 VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
 SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"

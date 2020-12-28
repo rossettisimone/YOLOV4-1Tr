@@ -1,30 +1,30 @@
-#%%
+
 import os
 import config as cfg
 
-#os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-#os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
-#%%
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
+
 import tensorflow as tf
 
-#gpus = tf.config.experimental.list_physical_devices('GPU')
-#if gpus:
-#	try:
-#		# Currently, memory growth needs to be the same across GPUs
-#		for gpu in gpus:
-#			tf.config.experimental.set_memory_growth(gpu, True)
-#		logical_devices = tf.config.experimental.list_logical_devices('GPU')
-#		print(len(gpus), "Physical GPUs,", len(logical_devices), "Logical GPUs")
-#	except RuntimeError as e:
-#		# Memory growth must be set before GPUs have been initialized
-#		print(e)
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+	try:
+		# Currently, memory growth needs to be the same across GPUs
+		for gpu in gpus:
+			tf.config.experimental.set_memory_growth(gpu, True)
+		logical_devices = tf.config.experimental.list_logical_devices('GPU')
+		print(len(gpus), "Physical GPUs,", len(logical_devices), "Logical GPUs")
+	except RuntimeError as e:
+		# Memory growth must be set before GPUs have been initialized
+		print(e)
 
 import random
 from PIL import Image
 import numpy as np
 from utils import file_reader, mask_clamp, read_image, encode_target, mask_resize
 #import matplotlib.pyplot as plt
-#%%
+
 class Generator(object):
     
     def _single_input_generator(self, index):
@@ -71,21 +71,20 @@ class Generator(object):
             image = np.array(Image.new('RGB', (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), color = (0, 0, 0)))
         height, width, _ = image.shape
         bboxes = []
-        masks = []
+        masks = [np.array(Image.new('L', (width, height), color=0))] #remove when masks will be added
         for person in video['p_l']:
             box = person["bb_l"][frame_id]
             if len(box)==8: # Siammask returns 4 coordinates, 8 scalars instead
                 xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
                 box=np.clip([min(xx),min(yy),max(xx),max(yy)],0,1)
-            p_id = -1
+            
             if not box == [0,0,0,0]:
-                p_id = person['p_id2']
-            bboxes.append(np.r_[box,1]*np.array([width, height, width, height, p_id]))
-            try:
-                mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))
-            except:
-                mask = np.array(Image.new('L', (width, height), color=0))
-            masks.append(mask)
+                bboxes.append(np.r_[box,1]*np.array([width, height, width, height, person['p_id_2']]))
+            # try:
+            #     mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))
+            # except:
+            #     mask = np.array(Image.new('L', (width, height), color=0))
+            # masks.append(mask)
         bboxes = np.array(bboxes)
         masks = np.array(masks)
         if self.data_aug:
@@ -176,13 +175,33 @@ class Generator(object):
 class DataLoader(Generator):
     def __init__(self):
         self.json_dataset = file_reader(cfg.ANNOTATION_PATH)
-        self.nID = 0
-        for i,k in enumerate(self.json_dataset):
-            for j,_ in enumerate(k['p_l']):
-                self.nID += 1
-                self.json_dataset[i]['p_l'][j]['p_id2'] = self.nID
-        self.nID += 1 #never remove it, classifier will predict nan for last id 
-        self.annotation = [(video,frame_id) for video in self.json_dataset for frame_id in range(0,61)] # (video,0),(video,10),..,(video,60) sample each 10 frames
+        self.nID = 1
+        if cfg.DATASET_TYPE == 'kinetics':
+            for i,k in enumerate(self.json_dataset):
+                for j,_ in enumerate(k['p_l']):
+                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.nID
+                    self.nID += 1
+        elif cfg.DATASET_TYPE == 'ava':
+            self.max_id_in_video = {}
+            for i,k in enumerate(self.json_dataset):
+                for j,_ in enumerate(k['p_l']):
+                    try:
+                        if self.json_dataset[i]['p_l'][j]['p_id'] > self.max_id_in_video[self.json_dataset[i]['v_id']]:
+                            self.max_id_in_video[self.json_dataset[i]['v_id']] = self.json_dataset[i]['p_l'][j]['p_id'] 
+                    except KeyError as e:
+                        self.max_id_in_video[self.json_dataset[i]['v_id']] = 0
+            # keys are ordered
+            self.keys_offset = {}
+            self.keys = sorted(self.max_id_in_video.keys())
+            self.offset = [1 if i == 0 else sum([self.max_id_in_video[m] for j,m in enumerate(self.keys) if j<i]) + 1 + i for i,k in enumerate(self.keys)]
+            for i,k in enumerate(self.keys):
+                self.keys_offset[k] = self.offset[i]
+            for i,k in enumerate(self.json_dataset):
+                for j,_ in enumerate(k['p_l']):
+                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id'] + self.keys_offset[self.json_dataset[i]['v_id']]
+            self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
+        #57398
+        self.annotation = [(video,frame_id) for video in self.json_dataset for frame_id in range(0,61) if not all(p['bb_l'][frame_id]==[0,0,0,0] for p in video['p_l'])] # (video,0),(video,10),..,(video,60) sample each 10 frames
         self.train_list, self.val_list = DataLoader.split_dataset(len(self.annotation))
         self.train_ds = self.initilize_ds(self.train_list)
         self.val_ds = self.initilize_ds(self.val_list)
@@ -208,7 +227,6 @@ class DataLoader(Generator):
     def input_generator(cls, id_list):
         for idx in range(len(id_list)):
             yield id_list[idx]
-
     
     def read_transform(self, idx):
         image, label_2, labe_3, label_4, label_5 = tf.py_function(self._single_input_generator, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
