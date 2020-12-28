@@ -8,12 +8,16 @@ import config as cfg
 #import matplotlib.pyplot as plt
 from backbone import cspdarknet53
 from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode
-from PIL import Image, ImageDraw 
+from PIL import Image, ImageDraw, ImageFont
+    
+    
+#class SoftmaxLoss(tf.keras.losses.Loss):
+#  def call(self, y_true, y_pred):
+#    return tf.nn.sparse_softmax_cross_entropy_with_logits(y_true, y_pred)
 
-
-class pan(tf.keras.Model):
-    def __init__(self, name='pan', **kwargs):
-        super(pan, self).__init__(name=name, **kwargs)
+class fpn(tf.keras.Model):
+    def __init__(self, name='fpn', **kwargs):
+        super(fpn, self).__init__(name=name, **kwargs)
         
         self.up_1 = CustomUpsampleAndConcatAndShuffle(filters=256, n=1)
         self.up_2 = CustomUpsampleAndConcatAndShuffle(filters=128, n=2)
@@ -44,9 +48,9 @@ class pan(tf.keras.Model):
                                         2**(cfg.LEVELS+n+(1 if n<cfg.LEVELS-1 else 0)))) for n in range(cfg.LEVELS)]
         return tf.keras.Model(inputs=inputs, outputs=self.call(inputs))
 
-class yolov3(tf.keras.Model):
-    def __init__(self, name='yolov3', **kwargs):
-        super(yolov3, self).__init__(name=name, **kwargs)
+class rpn(tf.keras.Model):
+    def __init__(self, name='rpn', **kwargs):
+        super(rpn, self).__init__(name=name, **kwargs)
         
         self.heads = [CustomDecode(level, n=level+1) for level in range(cfg.LEVELS)]
         
@@ -62,7 +66,7 @@ class tracker(tf.keras.Model):
     def __init__(self, freeze_bkbn = True, freeze_bn = False, data_loader = None, name='tracker', **kwargs):
         super(tracker, self).__init__(name=name, **kwargs)
         
-        self.nID = 0
+        self.nID = 170
         if data_loader is not None:
             self.ds = data_loader
             self.train_ds = self.ds.train_ds
@@ -85,17 +89,17 @@ class tracker(tf.keras.Model):
         self.writer = tf.summary.create_file_writer(cfg.SUMMARY_LOGDIR)
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
         self.SmoothL1Loss = tf.keras.losses.Huber(delta=1.0)
-        self.CrossEntropyLoss = tf.keras.losses.SparseCategoricalCrossentropy()
+#        self.SoftmaxLoss = SoftmaxLoss()
         self.CrossEntropyLossLogits = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)#
 #        self.strategy = tf.distribute.MirroredStrategy()
 
-        #BKBN
+        #CSPDARKNET53 
         self.bkbn = cspdarknet53()
-        #FPN
-        self.neck = pan()
-        #YOLO
-        self.head = yolov3()
+        #PANET LIKE
+        self.neck = fpn()
+        #YOLO LIKE
+        self.head = rpn()
         
         self.classifier = tf.keras.layers.Dense(self.nID) if self.nID>0 else None
         self.classifier.build((tf.newaxis,self.emb_dim))
@@ -107,14 +111,21 @@ class tracker(tf.keras.Model):
         b = self.bkbn(input_layers, training)
         n = self.neck(b, training)
         h = self.head(n, training, inferring)
+        if training and inferring:
+            # we havefor each level proposals for each image in the batch, thus to be more flexible we transpose the list of lists
+            # pythonic transpose list of list of irregular size: [[image1 - fpn1, image2 - fpn1, ..], [image1 - fpn2], [image2 - fpn2], ..]
+            l = [len(i) for i in h]
+            h = [[i[o] for ix, i in enumerate(h) if l[ix] > o] for o in range(max(l))] 
+            h = [tf.concat(p, axis=0) for p in h] # concat proposals from all levels for each image in batch
         return h
     
     def train_step(self, data):
         self.step_train += 1
         training = True
+        inferring = False
         image, *labels = data
         with tf.GradientTape() as tape:
-            preds = self(image, training=training)
+            preds = self(image, training=training, inferring=inferring)
             self.total_loss = [] 
             self.box_loss = []
             self.conf_loss = []
@@ -139,38 +150,41 @@ class tracker(tf.keras.Model):
                                                              self.mean_conf_loss, self.mean_id_loss, self.mean_total_loss))
 #    @tf.function
     def compute_loss(self, label, pred, emb, training):
-#        pred = tf.transpose(tf.reshape(pred, [pred.shape[0], pred.shape[1], pred.shape[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS + 5]), perm = [0, 3, 1, 2, 4])  # prediction        
         pbox = pred[..., :4]
-        pconf = pred[..., 4:6]  # Conf
+        pconf = pred[..., 4:6]
         tbox = label[...,:4]
         tconf = label[...,4]
         tids = label[...,5:6]
-#        tmask = label[..., 6]
         mask = tconf>0
-#        mask = tf.where(tf.greater(tconf, 0.0))
         lbox = self.SmoothL1Loss(tbox[mask],pbox[mask])
-        tconf = tf.where(tf.less(tconf, 0.0), 0.0, tconf)
-        pconf = tf.where(tf.less(tconf[...,tf.newaxis], 0.0), 0.0, pconf)
-        lconf =  self.CrossEntropyLoss(tconf,pconf)
+        pconf = self.entry_stop_gradients(pconf, tconf[...,tf.newaxis]<0) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
+        tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf), tf.int32)
+        lconf =  self.CrossEntropyLossLogits(tconf,pconf) # apply softmax and do non negative log likelihood loss 
         emb_mask = tf.cast(tf.math.reduce_max(tf.cast(mask, tf.float32), axis=1), tf.bool)
         tids = tf.math.reduce_max(tids, axis=1)
         tids = tids[emb_mask]
         embedding = emb[emb_mask]
         embedding = self.emb_scale * tf.math.l2_normalize(embedding,axis=1, epsilon=1e-12)
         logits = self.classifier(embedding)
-        tids = tf.where(tf.less(tids, 0.0), 0.0, tids)
-        logits = tf.where(tf.less(tids, 0.0), 0.0, logits)
+        logits = self.entry_stop_gradients(logits,tids<0)
+        tids = tf.cast(tf.where(tf.less(tids, 0.0), 0.0, tids),tf.int32) # stop gradient for regions labeled -1
         lid = self.CrossEntropyLossLogits(tf.squeeze(tids),logits)
         self.classifier_summary(embedding, training)
-        loss = tf.math.exp(-self.s_r)*lbox + tf.math.exp(-self.s_c)*lconf + tf.math.exp(-self.s_id)*lid + (self.s_r + self.s_c + self.s_id)
+        loss = tf.math.exp(-self.s_r)*lbox + tf.math.exp(-self.s_c)*lconf \
+                + tf.math.exp(-self.s_id)*lid + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing
         loss *= 0.5
         return loss, lbox, lconf, lid
     
+    def entry_stop_gradients(self,target, mask):
+        mask_neg = tf.math.logical_not(mask)
+        return tf.stop_gradient(tf.cast(mask,tf.float32) * target) + tf.cast(mask_neg,tf.float32) * target
+
     def test_step(self, data):
         self.step_val += 1
-        training = False
+        training = True
+        inferring = False
         image, *labels = data
-        preds = self(image, training=training)
+        preds = self(image, training=training, inferring=inferring)
         self.total_loss = [] 
         self.box_loss = []
         self.conf_loss = []
@@ -211,41 +225,29 @@ class tracker(tf.keras.Model):
             self.save('./tracker_weights_'+str(self.epoch)+'.tf')
     
     def infer(self, image):
-        assert tf.shape(image)[0]==1, 'batch must be one image at time'
-        preds = self(image, training=False, inferring=True)
-        pred = tf.concat(preds, axis=1)
-        pred = pred[pred[..., 4] > cfg.CONF_THRESH]
-        pred = tf.concat([tf.concat([pred[...,:2] - pred[...,2:4]*0.5, pred[...,:2] + pred[...,2:4]*0.5], axis=1),pred[...,4:]],axis=1)
-        # pred now has lesser number of proposals. Proposals rejected on basis of object confidence score
-        if len(pred) > 0:    
-            boxes = pred[...,:4]
-            scores = pred[...,4]
-            selected_indices = tf.image.non_max_suppression(
-                                boxes, scores, max_output_size=20, iou_threshold=cfg.NMS_THRESH,
-                                score_threshold=cfg.CONF_THRESH
-                            )
-            selected_boxes = tf.gather(pred, selected_indices)
-            # Final proposals are obtained in dets. Information of bounding box and embeddings also included
-            # Next step changes the detection scales
-#            scale_coords(self.opt.img_size, dets[:, :4], image.shape).round()
-#            '''Detections is list of (x1, y1, x2, y2, object_conf, class_score, class_pred)'''
-            # class_pred is the embeddings.
-#            detections = [] 
-
-            # creating new Image object 
-            img = Image.fromarray(np.array(image[0].numpy()*255,dtype=np.uint8)) 
-              
-            # create rectangle image 
-            img1 = ImageDraw.Draw(img)   
-            for bbox in selected_boxes.numpy():
-                shape = bbox[:4]
-                img1.rectangle(shape, outline ="red") 
-            img.show() 
-#            detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:4]), tlbrs[4], f.numpy(), 30) for
-#                          (tlbrs, f) in zip(dets[:, :5], dets[:, 6:])]
-        else:
-#            detections = []
+        training = True
+        inferring = True
+        proposals = self(image, training=training, inferring=inferring)
+        if len(proposals)==0:
             tf.print('None')
+        for i,proposal in enumerate(proposals):
+            if len(proposal)>0:
+                bboxs = proposal[...,:4]
+                confs = proposal[...,4] 
+                embs = proposal[...,5:] # needed for tracking
+                # Final proposals are obtained in dets. Information of bounding box and embeddings also included
+                img = Image.fromarray(np.array(image[i].numpy()*255,dtype=np.uint8))                   
+                draw = ImageDraw.Draw(img)   
+                for bbox,conf in zip(bboxs.numpy(), confs.numpy()):
+                    draw.rectangle(bbox, outline ="red") 
+                    xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
+                    draw.text(xy, str(round(conf,3)), font=ImageFont.truetype("arial.ttf"))
+                img.show() 
+    #            detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:4]), tlbrs[4], f.numpy(), 30) for
+    #                          (tlbrs, f) in zip(dets[:, :5], dets[:, 6:])]
+            else:
+    #            detections = []
+                tf.print('None')
             
     def loss_summary(self, training):
         with self.writer.as_default():
@@ -284,7 +286,7 @@ class tracker(tf.keras.Model):
                 for layer in net.bkbn.layers:
                     if 'batch_normalization' in layer.name:
                         layer.trainable = False
-            elif net.name == 'pan':
+            elif net.name == 'fpn':
                 for layer in net.layers:
                     if layer.name == 'upsample_concat_shuffle':
                         layer.up_concat.conv_1.batch_norm.trainable = False
@@ -318,8 +320,8 @@ class tracker(tf.keras.Model):
 
     def plot(self):
         tf.keras.utils.plot_model(self.bkbn.model, to_file='cspdarknet53.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
-        tf.keras.utils.plot_model(self.neck.build_graph(), to_file='pan.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
-        tf.keras.utils.plot_model(self.head.build_graph(), to_file='yolov3.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
+        tf.keras.utils.plot_model(self.neck.build_graph(), to_file='fpn.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
+        tf.keras.utils.plot_model(self.head.build_graph(), to_file='rpn.png', show_shapes=False,  show_layer_names=True, rankdir='TB', expand_nested=True, dpi=96)
         
     def custom_build(self):
         self.build((tf.newaxis, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))

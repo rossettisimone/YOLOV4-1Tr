@@ -25,18 +25,18 @@ from loader import DataLoader
     
 ds = DataLoader()
 model = tracker(data_loader = ds)
-model.custom_build() 
+model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
 #model.neck.summary()
 #model.head.summary()
-#model.summary()
+model.summary()
 model.fit()
 #import matplotlib.pyplot as plt
 #import time 
 #avg = 0
 #start = time.time()
-#for image, *labels in ds.train_ds.take(200).batch(1):
+for image, *labels in ds.train_ds.take(10).batch(1):
 #    print(image.shape)
 #    avg += time.time()-start
 #    start=time.time()
@@ -49,7 +49,7 @@ model.fit()
 #     plt.show()
 #     plt.imshow(image[0])
 #     plt.show()
-#    model.infer(image)
+     model.infer(image)
 #    plt.imshow(image[0])
 #    plt.show()
 #    for label in labels:

@@ -215,7 +215,7 @@ def decode_delta_map(delta_map, anchors):
     nB, nA, nGh, nGw, _ = delta_map.shape
     anchor_mesh = generate_anchor(nGh, nGw, anchors) 
     anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))              # Shpae (nA x nGh x nGw) x 4
-    anchor_mesh = tf.tile(anchor_mesh[None],(nB,1,1,1,1))
+    anchor_mesh = tf.tile(anchor_mesh[tf.newaxis],(nB,1,1,1,1))
     delta_map = tf.reshape(delta_map,(-1,4))* tf.reshape([0.1, 0.1, 0.2, 0.2],(1,4))
     pred_list = decode_delta(tf.reshape(delta_map,(-1,4)), tf.reshape(anchor_mesh,(-1,4)))
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
