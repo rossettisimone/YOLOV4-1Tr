@@ -2,33 +2,33 @@
 # VIDEOS_DATASET_PATH = "/home/temir/Documents/AVA/Dataset/Kin200/"
 # ANNOTATION_PATH = "/home/temir/Documents/AVA/Dataset/prova.json"
 #import numpy as np
-GPU = '0'
+GPU = '1'
 DATASET_TYPE = 'ava'
 
 # AVA_path 
-VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
-SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"
-ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json" # #ava_frames_boundings_train_v2.2.json
+VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames/"
+SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments"
+ANNOTATION_PATH = "/media/data4/Datasets/Kinetics_AVA/ava_frames_boundings_train_v2.2.json" # #ava_frames_boundings_train_v2.2.json
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH= 3
-TRAIN_SIZE = 512#416
+BATCH= 7
+TRAIN_SIZE = 416#416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 
 # Network
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20 #150
-ANCHORS = [ 6,  18,  12,  37,  23,  58,  48,  55,  53,  73,  12,  36,  25,
-        74,  46, 116,  97, 111, 106, 146,  24,  72,  50, 148,  92, 233,
-       194, 223, 212, 293,  48, 145, 101, 296, 184, 467, 388, 446, 425,
-       586]#[4,6, 5,7, 8,18, 9,19,  8,24, 11,34, 16,48, 23,68,  32,96, 45,135, 64,192, 90,271,  128,384, 180,540, 256,640, 512,640 ]#[8,24, 11,34, 16,48,  23,68,32,96, 45,135,  64,192, 90,271,128,384,  180,540, 256,640, 512,640 ]#[5,4, 12,7, 11,15, 12,16, 19,36, 40,28, 36,75, 76,55, 72,146, 142,110, 192,243, 459,401]
-##
-NUM_ANCHORS = 5
-BBOX_CLASS=4
-BBOX_REG=1
-MASK=0
+ANCHORS = [  4,  12,   6,  23,   8,  37,  10,  19,  24,  97,  28,  58,  33,
+        81,  34, 112,  85, 190,  96, 130,  99, 234, 118, 186, 267, 474,
+       335, 384, 349, 486, 442, 480]
+#[7,22, 14,45, 24,58, 37,67, 59,72, 15,45, 28,91, 48,116, 74,135, 118,145, 30,91, 57,183, 96,232, 149,270, 237,291, 61,183, 115,367, 192,464, 299,540, 475, 583]
+
+NUM_ANCHORS = 4
+BBOX_CLASS = 4
+BBOX_REG = 1
+MASK = 0
 STRIDES = [ 4, 8, 16, 32] #2
 #ANCHORS =  [  7,   7,  14,  28,  28, 21,  35,  56, 
 #            13,  13,  26,  52,  52,  39,  65, 104, 
