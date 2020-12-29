@@ -126,18 +126,126 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
     
+#def return_torch_unique_index(u, uv):
+#    n = uv.shape[1]  # number of columns
+#    first_unique = torch.zeros(n, device=u.device).long()
+#    for j in range(n):
+#        first_unique[j] = (uv[:, j:j + 1] == u).all(0).nonzero()[0]
+#
+#    return first_unique
+#import torch
+#def build_targets_max(target, anchor_wh, nA, nC, nGh, nGw):
+#    """
+#    returns nT, nCorrect, tx, ty, tw, th, tconf, tcls
+#    """
+#    nB = len(target)  # number of images in batch
+#
+#    txy = torch.zeros(nB, nA, nGh, nGw, 2).cuda()  # batch size, anchors, grid size
+#    twh = torch.zeros(nB, nA, nGh, nGw, 2).cuda()
+#    tconf = torch.LongTensor(nB, nA, nGh, nGw).fill_(0).cuda()
+#    tcls = torch.ByteTensor(nB, nA, nGh, nGw, nC).fill_(0).cuda()  # nC = number of classes
+#    tid = torch.LongTensor(nB, nA, nGh, nGw, 1).fill_(-1).cuda() 
+#    for b in range(nB):
+#        t = target[b]
+#        t_id = t[:, 1].clone().long().cuda()
+#        t = t[:,[0,2,3,4,5]]
+#        nTb = len(t)  # number of targets
+#        if nTb == 0:
+#            continue
+#
+#        #gxy, gwh = t[:, 1:3] * nG, t[:, 3:5] * nG
+#        gxy, gwh = t[: , 1:3].clone() , t[:, 3:5].clone()
+#        gxy[:, 0] = gxy[:, 0] * nGw
+#        gxy[:, 1] = gxy[:, 1] * nGh
+#        gwh[:, 0] = gwh[:, 0] * nGw
+#        gwh[:, 1] = gwh[:, 1] * nGh
+#        gi = torch.clamp(gxy[:, 0], min=0, max=nGw -1).long()
+#        gj = torch.clamp(gxy[:, 1], min=0, max=nGh -1).long()
+#
+#        # Get grid box indices and prevent overflows (i.e. 13.01 on 13 anchors)
+#        #gi, gj = torch.clamp(gxy.long(), min=0, max=nG - 1).t()
+#        #gi, gj = gxy.long().t()
+#
+#        # iou of targets-anchors (using wh only)
+#        box1 = gwh
+#        box2 = anchor_wh.unsqueeze(1)
+#        inter_area = torch.min(box1, box2).prod(2)
+#        iou = inter_area / (box1.prod(1) + box2.prod(2) - inter_area + 1e-16)
+#
+#        # Select best iou_pred and anchor
+#        iou_best, a = iou.max(0)  # best anchor [0-2] for each target
+#
+#        # Select best unique target-anchor combinations
+#        if nTb > 1:
+#            _, iou_order = torch.sort(-iou_best)  # best to worst
+#
+#            # Unique anchor selection
+#            u = torch.stack((gi, gj, a), 0)[:, iou_order]
+#            # _, first_unique = np.unique(u, axis=1, return_index=True)  # first unique indices
+#            first_unique = return_torch_unique_index(u, torch.unique(u, dim=1))  # torch alternative
+#            i = iou_order[first_unique]
+#            # best anchor must share significant commonality (iou) with target
+#            i = i[iou_best[i] > 0.60]  # TODO: examine arbitrary threshold
+#            if len(i) == 0:
+#                continue
+#
+#            a, gj, gi, t = a[i], gj[i], gi[i], t[i]
+#            t_id = t_id[i]
+#            if len(t.shape) == 1:
+#                t = t.view(1, 5)
+#        else:
+#            if iou_best < 0.60:
+#                continue
+#        
+#        tc, gxy, gwh = t[:, 0].long(), t[:, 1:3].clone(), t[:, 3:5].clone()
+#        gxy[:, 0] = gxy[:, 0] * nGw
+#        gxy[:, 1] = gxy[:, 1] * nGh
+#        gwh[:, 0] = gwh[:, 0] * nGw
+#        gwh[:, 1] = gwh[:, 1] * nGh
+#
+#        # XY coordinates
+#        txy[b, a, gj, gi] = gxy - gxy.floor()
+#
+#        # Width and height
+#        twh[b, a, gj, gi] = torch.log(gwh / anchor_wh[a])  # yolo method
+#        # twh[b, a, gj, gi] = torch.sqrt(gwh / anchor_wh[a]) / 2 # power method
+#
+#        # One-hot encoding of label
+#        tcls[b, a, gj, gi, tc] = 1
+#        tconf[b, a, gj, gi] = 1
+#        tid[b, a, gj, gi] = t_id.unsqueeze(1)
+#    tbox = torch.cat([txy, twh], -1)
+#    return tconf, tbox, tid
+
+
+def xyxy2xywh(xyxy):
+    # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
+    # x, y are coordinates of center 
+    # (x1, y1) and (x2, y2) are coordinates of bottom left and top right respectively. 
+    xy = (xyxy[...,:2]+xyxy[...,2:4])/2
+    wh = (xyxy[...,2:4]-xyxy[...,:2])
+    return tf.concat([xy,wh],axis=-1)
+
+
+def xywh2xyxy(xywh):
+    # Convert bounding box format from [x, y, w, h] to [x1, y1, x2, y2]
+    # x, y are coordinates of center 
+    # (x1, y1) and (x2, y2) are coordinates of bottom left and top right respectively. 
+    x1y1 = xywh[...,:2] - xywh[...,2:4]*0.5
+    x2y2 = xywh[...,:2] + xywh[...,2:4]*0.5
+    return tf.concat([x1y1, x2y2], axis=-1)
+
+
 def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
-    ID_THRESH = 0.5
-    FG_THRESH = 0.5
-    BG_THRESH = 0.4
+    ID_THRESH = 0.2
+    FG_THRESH = 0.2
+    BG_THRESH = 0.1
     assert(tf.shape(anchor_wh)[0]==nA)
     target = tf.constant(target, dtype=tf.float32)
-    bbox = target[:,:4]/416.0
-    gxy = bbox[:,:2]
-    gwh = bbox[:,2:4]-gxy
+    bbox = target[:,:4]/cfg.TRAIN_SIZE
     ids = target[:,4]
 
-    gt_boxes = tf.concat([gxy,gwh],axis=-1)
+    gt_boxes = xyxy2xywh(bbox)
     gt_boxes = gt_boxes * tf.constant([nGw, nGh, nGw, nGh], dtype=tf.float32)
     gt_boxes = tf.clip_by_value(gt_boxes, [0,0,0,0], [nGw, nGh, nGw, nGh])                                        # Shape Ngx4 (xc, yc, w, h)
     anchor_wh = tf.constant(anchor_wh, dtype=tf.float32)
@@ -172,9 +280,12 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
         fg_anchor_list = tf.reshape(anchor_list,(nA, nGh, nGw, 4))[fg_index] 
         delta_target = encode_delta(gt_box_list, fg_anchor_list)
         tbox = tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4))
-    tconf, tbox, tid = tf.transpose(tconf,(0,2,1)),tf.transpose(tbox,(0,2,1,3)),tf.transpose(tid,(0,2,1,3))
+#    tconf = tf.transpose(tconf,(0,2,1))
+#    tbox = tf.transpose(tbox,(0,2,1,3))
+#    tid = tf.transpose(tid,(0,2,1,3))
     tconf, tbox, tid = tf.cast(tconf,tf.float32), tf.cast(tbox,tf.float32), tf.cast(tid,tf.float32)
     label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
+#    label = tf.transpose(label,(0,2,1,3))
     return label
 
 def generate_anchor(nGh, nGw, anchor_wh):
@@ -216,7 +327,7 @@ def decode_delta_map(delta_map, anchors):
     anchor_mesh = generate_anchor(nGh, nGw, anchors) 
     anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))              # Shpae (nA x nGh x nGw) x 4
     anchor_mesh = tf.tile(anchor_mesh[tf.newaxis],(nB,1,1,1,1))
-    delta_map = tf.reshape(delta_map,(-1,4))* tf.reshape([0.1, 0.1, 0.2, 0.2],(1,4))
+#    delta_map = tf.reshape(delta_map,(-1,4))#* tf.reshape([0.1, 0.1, 0.2, 0.2],(1,4))
     pred_list = decode_delta(tf.reshape(delta_map,(-1,4)), tf.reshape(anchor_mesh,(-1,4)))
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map

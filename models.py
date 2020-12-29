@@ -66,7 +66,7 @@ class tracker(tf.keras.Model):
     def __init__(self, freeze_bkbn = True, freeze_bn = False, data_loader = None, name='tracker', **kwargs):
         super(tracker, self).__init__(name=name, **kwargs)
         
-        self.nID = 170
+        self.nID = 57398
         if data_loader is not None:
             self.ds = data_loader
             self.train_ds = self.ds.train_ds
@@ -238,19 +238,22 @@ class tracker(tf.keras.Model):
                 confs = proposal[...,4] 
                 embs = proposal[...,5:] # needed for tracking
                 # Final proposals are obtained in dets. Information of bounding box and embeddings also included
-                img = Image.fromarray(np.array(image[i].numpy()*255,dtype=np.uint8))                   
-                draw = ImageDraw.Draw(img)   
-                for bbox,conf in zip(bboxs.numpy(), confs.numpy()):
-                    draw.rectangle(bbox, outline ="red") 
-                    xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
-                    draw.text(xy, str(round(conf,3)), font=ImageFont.truetype("arial.ttf"))
-                img.show() 
+                self.draw_bbox(image[i], bboxs, confs)
     #            detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:4]), tlbrs[4], f.numpy(), 30) for
     #                          (tlbrs, f) in zip(dets[:, :5], dets[:, 6:])]
             else:
     #            detections = []
                 tf.print('None')
-            
+                
+    def draw_bbox(self,image, bboxs, conf_id):
+        img = Image.fromarray(np.array(image.numpy()*255,dtype=np.uint8))                   
+        draw = ImageDraw.Draw(img)   
+        for bbox,conf in zip(bboxs.numpy(), conf_id.numpy()):
+            draw.rectangle(bbox, outline ="red") 
+            xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
+            draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("arial.ttf"))
+        img.show() 
+        
     def loss_summary(self, training):
         with self.writer.as_default():
             scope = 'train' if training else 'val'

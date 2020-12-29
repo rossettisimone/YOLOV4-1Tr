@@ -23,10 +23,11 @@ import random
 from PIL import Image
 import numpy as np
 from utils import file_reader, mask_clamp, read_image, encode_target, mask_resize
+from utils_torch import encode_target_torch
 #import matplotlib.pyplot as plt
 
 class Generator(object):
-    
+            
     def _single_input_generator(self, index):
         [video, frame_id] = self.annotation[index]
         image, masks, bboxes = self._frame_bboxes_masks_generator(video, frame_id)
@@ -34,7 +35,10 @@ class Generator(object):
 #        mask = np.max(np.stack(masks,axis=0),axis=0)
 #        masks = [mask_resize(mask, size, size) for size in self.train_output_sizes]
         label_2, labe_3, label_4, label_5 = self.preprocess_labels(bboxes)
-        return image, label_2, labe_3, label_4, label_5
+        bboxes_ = np.zeros((20,5))
+        bboxes_[:,4]=-1
+        bboxes_[:bboxes.shape[0],:]=bboxes
+        return image, label_2, labe_3, label_4, label_5, bboxes_
     
     def image_preprocess(self, image, target_size, masks=None, gt_boxes=None):
         ih, iw    = target_size
@@ -176,6 +180,7 @@ class DataLoader(Generator):
     def __init__(self):
         self.json_dataset = file_reader(cfg.ANNOTATION_PATH)
         self.nID = 1
+        self.flow=True
         if cfg.DATASET_TYPE == 'kinetics':
             for i,k in enumerate(self.json_dataset):
                 for j,_ in enumerate(k['p_l']):
@@ -229,8 +234,8 @@ class DataLoader(Generator):
             yield id_list[idx]
     
     def read_transform(self, idx):
-        image, label_2, labe_3, label_4, label_5 = tf.py_function(self._single_input_generator, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
-        return image, label_2, labe_3, label_4, label_5
+        image, label_2, labe_3, label_4, label_5, bboxes = tf.py_function(self._single_input_generator, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
+        return image, label_2, labe_3, label_4, label_5, bboxes
 
     
     def initilize_ds(self, list_ids):

@@ -9,7 +9,7 @@ Created on Mon Dec 21 18:37:18 2020
 
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map
+from utils import decode_delta_map, xywh2xyxy
 
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
@@ -178,9 +178,7 @@ class CustomDecode(tf.keras.layers.Layer):
             for ii in range(preds.shape[0]): # batch images
                 pred = preds[ii]
                 pred = pred[pred[..., 4] > cfg.CONF_THRESH]
-                x1y1 = pred[...,:2] - pred[...,2:4]*0.5
-                x2y2 = pred[...,:2] + pred[...,2:4]*0.5
-                pred = tf.concat([tf.concat([x1y1, x2y2], axis=-1),pred[...,4:]],axis=-1) # to bbox
+                pred = tf.concat([xywh2xyxy(pred),pred[...,4:]],axis=-1) # to bbox
                 # pred now has lesser number of proposals. Proposals rejected on basis of object confidence score
                 if len(pred) > 0:    
                     boxes = pred[...,:4]
