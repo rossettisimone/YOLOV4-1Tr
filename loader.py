@@ -195,16 +195,15 @@ class DataLoader(Generator):
                     except KeyError as e:
                         self.max_id_in_video[self.json_dataset[i]['v_id']] = 0
             # keys are ordered
-            # self.keys_offset = {}
-            # self.keys = sorted(self.max_id_in_video.keys())
-            # self.offset = [1 if i == 0 else sum([self.max_id_in_video[m] for j,m in enumerate(self.keys) if j<i]) + 1 + i for i,k in enumerate(self.keys)]
-            # for i,k in enumerate(self.keys):
-            #     self.keys_offset[k] = self.offset[i]
+            self.keys_offset = {}
+            self.keys = sorted(self.max_id_in_video.keys())
+            self.offset = [1 if i == 0 else sum([self.max_id_in_video[m] for j,m in enumerate(self.keys) if j<i]) + 1 + i for i,k in enumerate(self.keys)]
+            for i,k in enumerate(self.keys):
+                self.keys_offset[k] = self.offset[i]
             for i,k in enumerate(self.json_dataset):
                 for j,_ in enumerate(k['p_l']):
-                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id']# + self.keys_offset[self.json_dataset[i]['v_id']]
-            # self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
-            self.nID = max(self.max_id_in_video.values()) + 1 #* len(self.max_id_in_video.values()) + 1
+                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id'] + self.keys_offset[self.json_dataset[i]['v_id']]
+            self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
         #57398
         self.annotation = [(video,frame_id) for video in self.json_dataset for frame_id in range(0,61) if not all(p['bb_l'][frame_id]==[0,0,0,0] for p in video['p_l'])] # (video,0),(video,10),..,(video,60) sample each 10 frames
         self.train_list, self.val_list = DataLoader.split_dataset(len(self.annotation))

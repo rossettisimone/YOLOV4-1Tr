@@ -172,23 +172,8 @@ class CustomDecode(tf.keras.layers.Layer):
             pbox = decode_delta_map(pbox, self.ANCHORS/self.STRIDE)
             pbox *= self.STRIDE
             preds = tf.concat([pbox, pconf, pemb], axis=-1)
-            preds = tf.reshape(preds, [preds.shape[0], -1, preds.shape[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
-#            pred = tf.concat(preds, axis=1)
-            proposals = []
-            for ii in range(preds.shape[0]): # batch images
-                pred = preds[ii]
-                pred = pred[pred[..., 4] > cfg.CONF_THRESH]
-                pred = tf.concat([xywh2xyxy(pred),pred[...,4:]],axis=-1) # to bbox
-                # pred now has lesser number of proposals. Proposals rejected on basis of object confidence score
-                if len(pred) > 0:    
-                    boxes = pred[...,:4]
-                    scores = pred[...,4]
-                    selected_indices = tf.image.non_max_suppression(
-                                        boxes, scores, max_output_size=20, iou_threshold=cfg.NMS_THRESH,
-                                        score_threshold=cfg.CONF_THRESH
-                                    )
-                    pred_emb = tf.gather(pred, selected_indices) #b x n rois x (4+1+1+208)
-                    proposals.append(pred_emb)
+            proposals = tf.reshape(preds, [preds.shape[0], -1, preds.shape[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
+            proposals = get_top(proposals)
             return proposals
     
 #        if align:
@@ -205,7 +190,19 @@ class CustomDecode(tf.keras.layers.Layer):
 #            rois = pred[...,:4]
 #            rois = tf.reshape(rois, (rois.shape[0],-1,rois.shape[-1]))
 #            return self.align(feature_map, rois), rois
-        
+            
+def get_top(proposals):
+    proposal_bests = []
+    for pred in proposals:
+        pred = pred[pred[..., 4] > cfg.CONF_THRESH]
+        indices = tf.argsort(pred[..., 4], axis=-1, direction='DESCENDING')[:cfg.MAX_PRED]
+        pred = tf.gather(pred,indices)
+        pred = tf.pad(pred,[[0,cfg.MAX_PRED-pred.shape[0]],[0,0]])
+        proposal_bests.append(pred)
+#            pred = tf.concat(preds, axis=1)
+    proposals = tf.stack(proposal_bests, axis=0)
+    return proposals
+            
 class ROIAlignLayer(tf.keras.layers.Layer):
     """ Implements Region Of Interest Max Pooling 
         for channel-first images and relative bounding box coordinates

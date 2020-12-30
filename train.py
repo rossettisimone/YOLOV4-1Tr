@@ -24,24 +24,24 @@ from loader import DataLoader
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/writer --port 6006
     
 ds = DataLoader()
-model = tracker(data_loader = ds)
+model = tracker(data_loader = None)
 model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
 #model.neck.summary()
 #model.head.summary()
-#model.summary()
-#model.load('tracker_weights_1.tf')
-model.fit()
+model.summary()
+model.load('./weights/tracker_weights_5.tf')
+#model.fit()
 #import matplotlib.pyplot as plt
-#import time 
+#import time +++++++++++++++++++++++++++++++++++
 #avg = 0
 #start = time.time()
 #from utils import decode_delta_map
 #import numpy as np
-#for image, label_2, label_3, label_4, label_5, bboxes in ds.train_ds.take(20).batch(1):
+for image, label_2, label_3, label_4, label_5, bboxes in ds.train_ds.take(20).batch(1):
 #    model.draw_bbox(image[0], bboxes[0][...,:4], bboxes[0][...,4:])
-##    model.infer(image)
+    model.infer(image)
 ##    plt.imshow(image[0])
 ##    plt.show()
 #    labels = [label_2, label_3, label_4, label_5]

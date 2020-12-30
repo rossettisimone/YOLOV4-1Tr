@@ -10,7 +10,7 @@ from backbone import cspdarknet53
 from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode
 from PIL import Image, ImageDraw, ImageFont
 import gc
-    
+from utils import xywh2xyxy
 #class SoftmaxLoss(tf.keras.losses.Loss):
 #  def call(self, y_true, y_pred):
 #    return tf.nn.sparse_softmax_cross_entropy_with_logits(y_true, y_pred)
@@ -66,7 +66,7 @@ class tracker(tf.keras.Model):
     def __init__(self, freeze_bkbn = True, freeze_bn = False, data_loader = None, name='tracker', **kwargs):
         super(tracker, self).__init__(name=name, **kwargs)
         
-        self.nID = 57398
+        self.nID = 972
         if data_loader is not None:
             self.ds = data_loader
             self.train_ds = self.ds.train_ds
@@ -111,12 +111,12 @@ class tracker(tf.keras.Model):
         b = self.bkbn(input_layers, training)
         n = self.neck(b, training)
         h = self.head(n, training, inferring)
-        if training and inferring:
-            # we havefor each level proposals for each image in the batch, thus to be more flexible we transpose the list of lists
-            # pythonic transpose list of list of irregular size: [[image1 - fpn1, image2 - fpn1, ..], [image1 - fpn2], [image2 - fpn2], ..]
-            l = [len(i) for i in h]
-            h = [[i[o] for ix, i in enumerate(h) if l[ix] > o] for o in range(max(l))] 
-            h = [tf.concat(p, axis=0) for p in h] # concat proposals from all levels for each image in batch
+#        if training and inferring:
+#            # we havefor each level proposals for each image in the batch, thus to be more flexible we transpose the list of lists
+#            # pythonic transpose list of list of irregular size: [[image1 - fpn1, image2 - fpn1, ..], [image1 - fpn2], [image2 - fpn2], ..]
+#            l = [len(i) for i in h]
+#            h = [[i[o] for ix, i in enumerate(h) if l[ix] > o] for o in range(max(l))] 
+#            h = [tf.concat(p, axis=0) for p in h] # concat proposals from all levels for each image in batch
         return h
     
     def train_step(self, data):
@@ -220,16 +220,43 @@ class tracker(tf.keras.Model):
             self.adapt_lr()
             for data in self.train_ds.take(self.steps_per_epoch*self.batch).batch(self.batch):
                 self.train_step(data)
-            self.save('./tracker_weights_'+str(self.epoch)+'.tf')
+            self.save('./weights/tracker_weights_'+str(self.epoch)+'.tf')
             gc.collect()
             for data in self.val_ds.take(100*self.batch).batch(self.batch):
                 self.test_step(data)               
             gc.collect()
     
+    def nms_proposals(self, proposals):
+        # we havefor each level proposals for each image in the batch, thus to be more flexible we transpose the list of lists
+        # pythonic transpose list of list of irregular size: [[image1 - fpn1, image2 - fpn1, ..], [image1 - fpn2], [image2 - fpn2], ..]
+#        l = [len(i) for i in proposals]
+#        proposals = [[i[o] for ix, i in enumerate(proposals) if l[ix] > o] for o in range(max(l))] 
+#        proposals = [tf.concat(p, axis=0) for p in proposals]
+        proposals = tf.concat(proposals,axis=1)
+        proposals_filtered = []
+        for pred in proposals: # batch images
+            pred = pred[pred[..., 4] > cfg.CONF_THRESH]
+            pred = tf.concat([xywh2xyxy(pred),pred[...,4:]],axis=-1) # to bbox
+                # pred now has lesser number of proposals. Proposals rejected on basis of object confidence score
+            if len(pred) > 0: 
+                boxes = pred[...,:4]
+                scores = pred[...,4]
+                selected_indices = tf.image.non_max_suppression(
+                                    boxes, scores, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,
+                                    score_threshold=cfg.CONF_THRESH
+                                )
+                pred_emb = tf.gather(pred, selected_indices) #b x n rois x (4+1+1+208)
+                proposals_filtered.append(tf.pad(pred_emb,[[0,cfg.MAX_PROP-pred_emb.shape[0]],[0,0]]))
+            else:
+                proposals_filtered.append(tf.zeros((cfg.MAX_PROP,proposals.shape[-1])))
+        proposals_filtered = tf.stack(proposals_filtered, axis=0)
+        return proposals_filtered
+    
     def infer(self, image):
         training = True
         inferring = True
         proposals = self(image, training=training, inferring=inferring)
+        proposals = self.nms_proposals(proposals)
         if len(proposals)==0:
             tf.print('None')
         for i,proposal in enumerate(proposals):
@@ -251,7 +278,7 @@ class tracker(tf.keras.Model):
         for bbox,conf in zip(bboxs.numpy(), conf_id.numpy()):
             draw.rectangle(bbox, outline ="red") 
             xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
-            draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("arial.ttf"))
+            draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"))
         img.show() 
         
     def loss_summary(self, training):
