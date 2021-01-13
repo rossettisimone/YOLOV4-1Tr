@@ -22,24 +22,42 @@ if gpus:
 import random
 from PIL import Image
 import numpy as np
-from utils import file_reader, mask_clamp, read_image, encode_target, mask_resize
+from utils import file_reader, mask_clamp, read_image, encode_target
 #import matplotlib.pyplot as plt
 
 class Generator(object):
             
     def _single_input_generator(self, index):
         [video, frame_id] = self.annotation[index]
-        image, masks, bboxes = self._frame_bboxes_masks_generator(video, frame_id)
-        image, masks, bboxes = self.image_preprocess(image, (self.train_input_size,self.train_input_size), masks, bboxes)
-#        mask = np.max(np.stack(masks,axis=0),axis=0)
-#        masks = [mask_resize(mask, size, size) for size in self.train_output_sizes]
-        label_2, labe_3, label_4, label_5 = self.preprocess_labels(bboxes)
-        bboxes_ = np.zeros((20,5))
-        bboxes_[:,4]=-1
-        bboxes_[:bboxes.shape[0],:]=bboxes
-        return image, label_2, labe_3, label_4, label_5, bboxes_
+        image, masks, bboxes = self.data_generator(video, frame_id)
+        if self.data_aug:
+            image, masks, bboxes = self.data_augment(image, masks, bboxes)
+        image, masks, bboxes = self.data_resize(image, bboxes, masks, (self.train_input_size,self.train_input_size))
+        label_2, labe_3, label_4, label_5 = self.data_pyramid_lables(bboxes)
+        masks = self.masks_crop_resize(masks, bboxes, cfg.MASK_SIZE)
+        masks, bboxes = self.data_pad_max_instances(masks, bboxes, cfg.MAX_INSTANCES)
+        return image, label_2, labe_3, label_4, label_5, masks, bboxes
     
-    def image_preprocess(self, image, target_size, masks=None, gt_boxes=None):
+    def data_pad_max_instances(self, masks, bboxes, max_instances):
+        bboxes_padded = np.zeros((max_instances,5))
+        bboxes_padded[:,4]=-1
+        min_bbox = min(bboxes.shape[0], max_instances)
+        bboxes_padded[:min_bbox,:]=bboxes[:min_bbox,:]
+        masks_padded = np.zeros((max_instances,masks.shape[1],masks.shape[2]))
+        min_mask = min(masks.shape[0], max_instances)
+        masks_padded[:min_mask,:,:]=masks[:min_mask,:,:]
+        return masks_padded, bboxes_padded
+        
+    def masks_crop_resize(self, masks, bboxes, mask_size):
+        masks_c_r = []
+        for mask, bbox in zip(masks, bboxes):
+            mask = Image.fromarray(mask[bbox[1]:bbox[3],bbox[0]:bbox[2]])
+            mask = np.round(mask.resize((mask_size,mask_size), Image.ANTIALIAS))
+            masks_c_r.append(mask)
+        masks = np.stack(masks_c_r,axis=0)
+        return masks
+        
+    def data_resize(self, image, gt_boxes, masks, target_size):
         ih, iw    = target_size
         h,  w, _  = image.shape
         scale = min(iw/w, ih/h)
@@ -50,20 +68,17 @@ class Generator(object):
         dw, dh = (iw - nw) // 2, (ih-nh) // 2
         image_paded[dh:nh+dh, dw:nw+dw, :] = image_resized
         image_paded = image_paded / 255.
-        if gt_boxes is None or masks is None :
-            return image_paded
-        else:
-            gt_boxes[:, [0, 2]] = gt_boxes[:, [0, 2]] * scale + dw
-            gt_boxes[:, [1, 3]] = gt_boxes[:, [1, 3]] * scale + dh
-            masks_padded = np.zeros((masks.shape[0],iw, ih))
-            for i, maskk in enumerate(masks):
-                mask = Image.fromarray(maskk)
-                mask_resized = np.round(mask.resize((nw, nh),Image.ANTIALIAS))
-                masks_padded[i, dh:nh+dh, dw:nw+dw] = mask_resized
-            gt_boxes = np.array(gt_boxes,dtype=np.uint32)
-            return image_paded, masks_padded, gt_boxes
+        gt_boxes[:, [0, 2]] = gt_boxes[:, [0, 2]] * scale + dw
+        gt_boxes[:, [1, 3]] = gt_boxes[:, [1, 3]] * scale + dh
+        masks_padded = np.zeros((masks.shape[0],iw, ih))
+        for i, maskk in enumerate(masks):
+            mask = Image.fromarray(maskk)
+            mask_resized = np.round(mask.resize((nw, nh),Image.ANTIALIAS))
+            masks_padded[i, dh:nh+dh, dw:nw+dw] = mask_resized
+        gt_boxes = np.array(gt_boxes,dtype=np.uint32)
+        return image_paded, masks_padded, gt_boxes
         
-    def _frame_bboxes_masks_generator(self, video, frame_id):
+    def data_generator(self, video, frame_id):
         frame_name = video['f_l'][frame_id]
         v_id =  video['v_id']
 #        class_ = 1
@@ -74,33 +89,32 @@ class Generator(object):
             image = np.array(Image.new('RGB', (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), color = (0, 0, 0)))
         height, width, _ = image.shape
         bboxes = []
-        masks = [np.array(Image.new('L', (width, height), color=0))] #remove when masks will be added
+        masks = [] 
         for person in video['p_l']:
             box = person["bb_l"][frame_id]
+            box=np.clip(box,0,1)
             if len(box)==8: # Siammask returns 4 coordinates, 8 scalars instead
                 xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
-                box=np.clip([min(xx),min(yy),max(xx),max(yy)],0,1)
-            
-            if not box == [0,0,0,0]:
-                bboxes.append(np.r_[box,1]*np.array([width, height, width, height, person['p_id_2']]))
-            # try:
-            #     mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))
-            # except:
-            #     mask = np.array(Image.new('L', (width, height), color=0))
-            # masks.append(mask)
-        bboxes = np.array(bboxes)
-        masks = np.array(masks)
-        if self.data_aug:
-            image, masks, bboxes = self.random_horizontal_flip(
-                np.copy(image), np.copy(masks), np.copy(bboxes)
-            )
-            image, masks, bboxes = self.random_crop(np.copy(image), np.copy(masks), np.copy(bboxes))
-            image, masks, bboxes = self.random_translate(
-                np.copy(image), np.copy(masks), np.copy(bboxes)
-            )
+                box=np.array([min(xx),min(yy),max(xx),max(yy)])
+            if not np.all(box==0):
+                box = np.r_[box,1]*np.array([width, height, width, height, person['p_id_2']])
+                try:
+                     mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))
+                except:
+                     mask = np.array(Image.new('L', (width, height), color=0))
+                bboxes.append(box)
+                masks.append(mask)
+        bboxes = np.stack(bboxes,axis=0)
+        masks = np.stack(masks,axis=0)
         return image, masks, bboxes
 
-    def preprocess_labels(self, bboxes):
+    def data_augment(self, image, masks, bboxes):
+        image, masks, bboxes = self.random_horizontal_flip(image, masks, bboxes)
+        image, masks, bboxes = self.random_crop(image, masks, bboxes)
+        image, masks, bboxes = self.random_translate(image, masks, bboxes)
+        return image, masks, bboxes
+    
+    def data_pyramid_lables(self, bboxes):
         labels = []
         for level in range(cfg.LEVELS):
             label = encode_target(bboxes, self.anchors[level]/self.strides[level], cfg.NUM_ANCHORS, self.num_classes, self.train_output_sizes[level], self.train_output_sizes[level])
@@ -143,8 +157,8 @@ class Generator(object):
             )
             image = image[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
             masks = masks[:,crop_ymin:crop_ymax, crop_xmin:crop_xmax]
-            bboxes[:, [0, 2]] = bboxes[:, [0, 2]] - crop_xmin
-            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] - crop_ymin
+            bboxes[:, [0, 2]] -= crop_xmin
+            bboxes[:, [1, 3]] -= crop_ymin
 
         return image, masks, bboxes
     
@@ -170,8 +184,8 @@ class Generator(object):
             masks = np.zeros_like(masks)
             image[max(0,ty):min(h,h+ty),max(0,tx):min(w,w+tx),:] = old_image[max(0,-ty):min(h,h-ty),max(0,-tx):min(w,w-tx),:]
             masks[:,max(0,ty):min(h,h+ty),max(0,tx):min(w,w+tx)] = old_masks[:,max(0,-ty):min(h,h-ty),max(0,-tx):min(w,w-tx)]
-            bboxes[:, [0, 2]] = bboxes[:, [0, 2]] + tx
-            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] + ty
+            bboxes[:, [0, 2]] += tx
+            bboxes[:, [1, 3]] += ty
             
         return image, masks, bboxes
     
@@ -233,8 +247,8 @@ class DataLoader(Generator):
             yield id_list[idx]
     
     def read_transform(self, idx):
-        image, label_2, labe_3, label_4, label_5, bboxes = tf.py_function(self._single_input_generator, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
-        return image, label_2, labe_3, label_4, label_5, bboxes
+        image, label_2, labe_3, label_4, label_5, masks, bboxes = tf.py_function(self._single_input_generator, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
+        return image, label_2, labe_3, label_4, label_5, masks, bboxes
 
     
     def initilize_ds(self, list_ids):

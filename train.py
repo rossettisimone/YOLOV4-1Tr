@@ -24,24 +24,43 @@ from loader import DataLoader
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/writer --port 6006
     
 ds = DataLoader()
-model = tracker(data_loader = None)
-model.custom_build()
+model = tracker(data_loader = ds)
+#model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
 #model.neck.summary()
 #model.head.summary()
-model.summary()
-model.load('./weights/tracker_weights_5.tf')
-#model.fit()
+#model.summary()
+#model.load('./tracker_weights_10.tf')
+model.fit()
 #import matplotlib.pyplot as plt
+#import numpy as np
 #import time +++++++++++++++++++++++++++++++++++
 #avg = 0
 #start = time.time()
 #from utils import decode_delta_map
+#ds.anchors=tf.cast(tf.reshape(tf.constant(cfg.ANCHORS),(4,4,2)),tf.float32)
+#ds.data_aug=False
 #import numpy as np
-for image, label_2, label_3, label_4, label_5, bboxes in ds.train_ds.take(20).batch(1):
+#l = 0
+#o = 0
+#z = 0
+#def tf_count(t, val):
+#    elements_equal_to_value = tf.equal(t, val)
+#    as_ints = tf.cast(elements_equal_to_value, tf.int32)
+#    count = tf.reduce_sum(as_ints)
+#    return count
+#for image, label_2, label_3, label_4, label_5, masks, bboxes in ds.val_ds.take(10).batch(1):
+#    plt.imshow(image[0])
+#    plt.show()
+#    for i,m in enumerate(masks[0]):
+#        if not np.all(m==0):
+#            print(bboxes[0,i])
+#            plt.imshow(m)
+#            plt.show()
+    
 #    model.draw_bbox(image[0], bboxes[0][...,:4], bboxes[0][...,4:])
-    model.infer(image)
+#    model.infer(image)
 ##    plt.imshow(image[0])
 ##    plt.show()
 #    labels = [label_2, label_3, label_4, label_5]
@@ -49,10 +68,31 @@ for image, label_2, label_3, label_4, label_5, bboxes in ds.train_ds.take(20).ba
 ##        print(l.shape)
 #    for label in labels:
 #        for anchor in label[0]:
+#            l+=tf_count(anchor[:,:,4],-1)
+#            o+=tf_count(anchor[:,:,4],1)
+#            z+=tf_count(anchor[:,:,4],0)
 #            plt.imshow(anchor[:,:,4])
-#            if (np.any(anchor[:,:,4])!=0):
-#                print(anchor[:,:,4])
+##            if (np.any(anchor[:,:,4])!=0):
+##                print(anchor[:,:,4])
 #            plt.show()
+            
+#l
+#Out[40]: <tf.Tensor: shape=(), dtype=int32, numpy=8767>
+#
+#o
+#Out[41]: <tf.Tensor: shape=(), dtype=int32, numpy=7512>
+#
+#z
+#Out[42]: <tf.Tensor: shape=(), dtype=int32, numpy=558321>
+#+++++++++++++++++++++++++++++++++++++++++
+#l
+#Out[44]: <tf.Tensor: shape=(), dtype=int32, numpy=25565>
+#
+#o
+#Out[45]: <tf.Tensor: shape=(), dtype=int32, numpy=18603>
+#
+#z
+#Out[46]: <tf.Tensor: shape=(), dtype=int32, numpy=530432>
 #    proposals = []
 #    pb = []
 #    ps = []
@@ -73,7 +113,7 @@ for image, label_2, label_3, label_4, label_5, bboxes in ds.train_ds.take(20).ba
 #        
 #        for ii in range(preds.shape[0]): # batch images
 #            pred = preds[ii]
-#            pred = pred[pred[..., 4] > cfg.CONF_THRESH]
+#            pred = pred[pred[..., 4] > 0.5]
 #            x1y1 = pred[...,:2] - pred[...,2:4]*0.5
 #            x2y2 = pred[...,:2] + pred[...,2:4]*0.5
 #            pred = tf.concat([tf.concat([x1y1, x2y2], axis=-1),pred[...,4:]],axis=-1) # to bbox
@@ -87,8 +127,9 @@ for image, label_2, label_3, label_4, label_5, bboxes in ds.train_ds.take(20).ba
 #        boxes = tf.concat(pb,axis=0)
 #        scores = tf.concat(ps,axis=0)
 #        selected_indices = tf.image.non_max_suppression(
-#                            boxes, scores, max_output_size=20, iou_threshold=cfg.NMS_THRESH,
-#                            score_threshold=0.9
+#                            boxes, scores, max_output_size=20, iou_threshold=0.5,
+#                            score_threshold=0.5
 #                        )
-#        proposals = tf.gather(pred, selected_indices) #b x n rois x (4+1+1+208)
-#        model.draw_bbox(image[0], proposals[...,:4], proposals[...,4:5])
+#        boxes = tf.gather(boxes, selected_indices) #b x n rois x (4+1+1+208)
+#        scores = tf.gather(scores, selected_indices) 
+#        model.draw_bbox(image[0],boxes, scores)

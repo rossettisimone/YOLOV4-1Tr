@@ -13,18 +13,25 @@ import config as cfg
 class cspdarknet53(tf.keras.Model):
     def __init__(self, pretrained = True, name='cspdarknet53', **kwargs):
         super(cspdarknet53, self).__init__(name=name, **kwargs)
-        self.input_layer_ = tf.keras.layers.Input([cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3])
-        self.output_layer_ = functional_cspdarknet53(self.input_layer_)
-        self.model = tf.keras.Model(self.input_layer_, self.output_layer_)
+        self.model = self.build_graph()
         if pretrained:
-            load_weights_functional_cspdarknet53(self.model, cfg.CSP_DARKNET53)
+            load_weights_cspdarknet53(self.model, cfg.CSP_DARKNET53)
             self.model.trainable=False
         
     def call(self, input_layers, training=False):
         return self.model(input_layers)
-
-
-def functional_cspdarknet53(input_data):
+    
+    def build_graph(self):
+        input_shape = self.get_input_shape()
+        return tf.keras.Model(inputs=input_shape, outputs=cspdarknet53_graph(input_shape))
+    
+    def get_input_shape(self):
+        return tf.keras.layers.Input((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+        
+    def get_output_shape(self):
+        return [out.shape for out in self.call(self.get_input_shape())]
+        
+def cspdarknet53_graph(input_data):
 
     input_data = convolutional(input_data, (3, 3,  3,  32), activate_type="mish")  # 208 x 208 x 32
     input_data = convolutional(input_data, (3, 3, 32,  64), downsample=True, activate_type="mish") 
@@ -94,7 +101,7 @@ def functional_cspdarknet53(input_data):
 
     return route_2, route_3, route_4, input_data #route_1
 
-def load_weights_functional_cspdarknet53(model, weights_file):
+def load_weights_cspdarknet53(model, weights_file):
   
     cutoff = 78
     wf = open(weights_file, 'rb')
