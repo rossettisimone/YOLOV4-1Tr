@@ -137,55 +137,44 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
     b2_area = tf.broadcast_to(tf.reshape((b2_x2 - b2_x1) * (b2_y2 - b2_y1),(1,-1)),[N,M])
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
-    
-def batch_bbox_iou(box1, box2, x1y1x2y2=False):
-    batch_iou = []
-    for b1, b2 in  zip(box1, box2):
-        batch_iou.append(bbox_iou(b1,b2,x1y1x2y2))
-    return tf.stack(batch_iou, axis=0)
            
 def get_top_proposals(batch_proposals):
-    proposal_bests = []
-    for pred in batch_proposals:
+    nB = tf.shape(batch_proposals)[0]
+    top_proposals = tf.TensorArray(tf.float32, size=nB)
+    for i in range(nB):
+        pred = batch_proposals[i]
         pred = pred[pred[..., 4] > cfg.CONF_THRESH]
         indices = tf.argsort(pred[..., 4], axis=-1, direction='DESCENDING')[:cfg.MAX_PRED]
         pred = tf.gather(pred,indices)
-        pred = tf.pad(pred,[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]])
-        proposal_bests.append(pred)
-    proposals = tf.stack(proposal_bests, axis=0)
-    return proposals
+        pred = tf.pad(pred,paddings=[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
+        top_proposals = top_proposals.write(i,pred)
+    top_proposals = top_proposals.stack()
+    return top_proposals
 
 def nms_proposals(batch_proposals):
-    # we havefor each level proposals for each image in the batch, thus to be more flexible we transpose the list of lists
-    # pythonic transpose list of list of irregular size: [[image1 - fpn1, image2 - fpn1, ..], [image1 - fpn2], [image2 - fpn2], ..]
-#        l = [len(i) for i in proposals]
-#        proposals = [[i[o] for ix, i in enumerate(proposals) if l[ix] > o] for o in range(max(l))] 
-#        proposals = [tf.concat(p, axis=0) for p in proposals]
-    proposals_filtered = []
-    for pred in batch_proposals: # batch images
-        pred = pred[pred[..., 4] > cfg.CONF_THRESH]
-        boxes = xywh2xyxy(pred)
-        pred = tf.concat([boxes,pred[...,4:]],axis=-1) # to bbox
-            # pred now has lesser number of proposals. Proposals rejected on basis of object confidence score
+    nB = tf.shape(batch_proposals)[0]
+    nms_proposals = tf.TensorArray(tf.float32, size=nB)
+    for i in range(nB): # batch images
+        pred = batch_proposals[i]
+        pred = pred[pred[...,4] > cfg.CONF_THRESH] # remove zeros (speed non max suppress)
         if len(pred) > 0: 
-            boxes = pred[...,:4]
-            scores = pred[...,4]
-            selected_indices = tf.image.non_max_suppression(
-                                boxes, scores, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,
+            pred = tf.concat([xywh2xyxy(pred[...,:4]),pred[...,4:]],axis=-1) # to bbox
+            indices = tf.image.non_max_suppression(
+                                 pred[...,:4], pred[...,4], max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,
                                 score_threshold=cfg.CONF_THRESH
                             )
-            pred_emb = tf.gather(pred, selected_indices) #b x n rois x (4+1+1+208)
-            proposals_filtered.append(tf.pad(pred_emb,[[0,cfg.MAX_PROP-pred_emb.shape[0]],[0,0]]))
+            pred = tf.gather(pred, indices) #b x n rois x (4+1+1+208)
+            nms_proposals = nms_proposals.write(i,tf.pad(pred,paddings=[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0))
         else:
-            proposals_filtered.append(tf.zeros((cfg.MAX_PROP,batch_proposals.shape[-1])))
-    proposals_filtered = tf.stack(proposals_filtered, axis=0)
-    return proposals_filtered
+            nms_proposals = nms_proposals.write(i,tf.zeros((cfg.MAX_PROP,tf.shape(pred)[-1]),dtype=tf.float32))
+    nms_proposals = nms_proposals.stack()
+    return nms_proposals
 
 def xyxy2xywh(xyxy):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
     # x, y are coordinates of center 
     # (x1, y1) and (x2, y2) are coordinates of bottom left and top right respectively. 
-    xy = (xyxy[...,:2]+xyxy[...,2:4])/2
+    xy = (xyxy[...,:2]+xyxy[...,2:4])*0.5
     wh = (xyxy[...,2:4]-xyxy[...,:2])
     return tf.concat([xy,wh],axis=-1)
 

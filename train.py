@@ -1,9 +1,11 @@
 import os
 import config as cfg
+#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
 
 import tensorflow as tf
+#tf.get_logger().setLevel('WARNING')
 tf.compat.v1.reset_default_graph()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -17,7 +19,9 @@ if gpus:
 	except RuntimeError as e:
 		# Memory growth must be set before GPUs have been initialized
 		print(e)
-
+else: 
+    print('No GPU found')
+    
 from models import tracker
 from loader import DataLoader 
 
@@ -25,7 +29,7 @@ from loader import DataLoader
     
 ds = DataLoader()
 model = tracker(data_loader = ds)
-#model.custom_build()
+model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
 #model.neck.summary()
@@ -33,9 +37,8 @@ model = tracker(data_loader = ds)
 #model.summary()
 #model.load('./tracker_weights_10.tf')
 model.fit()
-#import matplotlib.pyplot as plt
-#import numpy as np
-#import time +++++++++++++++++++++++++++++++++++
+
+#import time
 #avg = 0
 #start = time.time()
 #from utils import decode_delta_map
@@ -50,7 +53,10 @@ model.fit()
 #    as_ints = tf.cast(elements_equal_to_value, tf.int32)
 #    count = tf.reduce_sum(as_ints)
 #    return count
-#for image, label_2, label_3, label_4, label_5, masks, bboxes in ds.val_ds.take(10).batch(1):
+#import matplotlib.pyplot as plt
+#import numpy as np
+#for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.val_ds.take(2).batch(2):
+#    a=1
 #    plt.imshow(image[0])
 #    plt.show()
 #    for i,m in enumerate(masks[0]):
@@ -60,6 +66,14 @@ model.fit()
 #            plt.show()
     
 #    model.draw_bbox(image[0], bboxes[0][...,:4], bboxes[0][...,4:])
+#    training = True
+#    inferring = True
+#    preds, embs, proposals, logits, probs, bboxes, masks = model(image, training=True, inferring=True)
+#    for i,m in enumerate(masks[0]):
+#        if not np.all(m==0):
+#            print(bboxes[0,i])
+#            plt.imshow(m)
+#            plt.show()
 #    model.infer(image)
 ##    plt.imshow(image[0])
 ##    plt.show()
