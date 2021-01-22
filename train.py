@@ -21,9 +21,9 @@ if gpus:
 from models import tracker
 from loader import DataLoader 
 
-# tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/writer --port 6006
+# tensorboard --logdir /media/data4/Models/simenv/tracker/logdir --port 6006
     
-ds = DataLoader()
+ds = DataLoader(shuffle=False)
 model = tracker(data_loader = ds)
 model.custom_build()
 #model.plot()

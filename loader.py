@@ -176,10 +176,11 @@ class Generator(object):
         return image, masks, bboxes
     
 class DataLoader(Generator):
-    def __init__(self):
+    def __init__(self, shuffle=True):
         self.json_dataset = file_reader(cfg.ANNOTATION_PATH)
         self.nID = 1
-        self.flow=True
+        self.shuffle=shuffle
+        
         if cfg.DATASET_TYPE == 'kinetics':
             for i,k in enumerate(self.json_dataset):
                 for j,_ in enumerate(k['p_l']):
@@ -202,12 +203,12 @@ class DataLoader(Generator):
             #     self.keys_offset[k] = self.offset[i]
             for i,k in enumerate(self.json_dataset):
                 for j,_ in enumerate(k['p_l']):
-                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id']# + self.keys_offset[self.json_dataset[i]['v_id']]
+                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id'] #+ self.keys_offset[self.json_dataset[i]['v_id']]
             # self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
             self.nID = max(self.max_id_in_video.values()) + 1 #* len(self.max_id_in_video.values()) + 1
         #57398
         self.annotation = [(video,frame_id) for video in self.json_dataset for frame_id in range(0,61) if not all(p['bb_l'][frame_id]==[0,0,0,0] for p in video['p_l'])] # (video,0),(video,10),..,(video,60) sample each 10 frames
-        self.train_list, self.val_list = DataLoader.split_dataset(len(self.annotation))
+        self.train_list, self.val_list = self.split_dataset(len(self.annotation))
         self.train_ds = self.initilize_ds(self.train_list)
         self.val_ds = self.initilize_ds(self.val_list)
         self.data_aug = cfg.DATA_AUGMENTATION
@@ -221,10 +222,10 @@ class DataLoader(Generator):
         tf.print('Dataset loaded.')
         tf.print('# identities:',self.nID)
             
-    @classmethod
-    def split_dataset(cls, ds_size):
+    def split_dataset(self, ds_size):
         total_list = np.arange(ds_size)
-        np.random.shuffle(total_list)
+        if self.shuffle:
+            np.random.shuffle(total_list)
         divider =round(ds_size*cfg.SPLIT_RATIO)
         return total_list[:divider], total_list[divider:]
 
