@@ -7,13 +7,10 @@ import numpy as np
 import config as cfg
 #import matplotlib.pyplot as plt
 from backbone import cspdarknet53
-from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode
+from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode,ProposalLayer, PyramidROIAlign_AFP
 from PIL import Image, ImageDraw, ImageFont
 import gc
-    
-#class SoftmaxLoss(tf.keras.losses.Loss):
-#  def call(self, y_true, y_pred):
-#    return tf.nn.sparse_softmax_cross_entropy_with_logits(y_true, y_pred)
+from utils import nms_proposals, bbox_iou, xywh2xyxy, xyxy2xywh, encode_delta
 
 class fpn(tf.keras.Model):
     def __init__(self, name='fpn', **kwargs):
@@ -41,13 +38,17 @@ class fpn(tf.keras.Model):
         n_3 = self.down_3(n_2,p_3, training)
         n_4 = self.down_2(n_3,p_4, training)
         n_5 = self.down_1(n_4,p_5, training)
-        return  n_2, n_3, n_4, n_5 #n_1
+        return  n_2, n_3, n_4, n_5 #n_1 #embedding
     
     def build_graph(self):
-        inputs = [tf.keras.Input(shape=(13*2**(cfg.LEVELS-1-n), 13*2**(cfg.LEVELS-1-n), 
-                                        2**(cfg.LEVELS+n+(1 if n<cfg.LEVELS-1 else 0)))) for n in range(cfg.LEVELS)]
-        return tf.keras.Model(inputs=inputs, outputs=self.call(inputs))
-
+        return tf.keras.Model(inputs=self.get_input_shape(), outputs=self.call(self.get_input_shape()))
+    
+    def get_input_shape(self):
+        return [tf.keras.Input(shape=(cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], 
+                                        128*2**(i-(0 if i<cfg.LEVELS-1 else 1)))) for i in range(cfg.LEVELS)]
+    def get_output_shape(self):
+        return self.call(self.get_input_shape())
+        
 class rpn(tf.keras.Model):
     def __init__(self, name='rpn', **kwargs):
         super(rpn, self).__init__(name=name, **kwargs)
@@ -55,18 +56,27 @@ class rpn(tf.keras.Model):
         self.heads = [CustomDecode(level, n=level+1) for level in range(cfg.LEVELS)]
         
     def call(self, input_layers, training=False, inferring=False):
-        return [(f(n, training, inferring)) for f, n in zip(self.heads ,input_layers)]
+        preds = []
+        embs = []
+        for i in range(cfg.LEVELS):
+            x = self.heads[i](input_layers[i], training, inferring)
+            preds.append(x[0])
+            embs.append(x[1])
+        return preds, embs
+
+    def get_input_shape(self):
+        return [tf.keras.Input(shape=(cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], 
+                                        64*2**i)) for i in range(cfg.LEVELS)]
+    def get_output_shape(self):
+        preds, embs = self.call(self.get_input_shape())
+        return [out.shape for out in preds], [out.shape for out in embs]
     
-    def build_graph(self):
-        inputs = [tf.keras.Input(shape=(13*2**(cfg.LEVELS-1-n), 13*2**(cfg.LEVELS-1-n), 
-                                        2**(cfg.LEVELS+n))) for n in range(cfg.LEVELS)]
-        return tf.keras.Model(inputs=inputs, outputs=self.call(inputs))
-    
-class tracker(tf.keras.Model):
-    def __init__(self, freeze_bkbn = True, freeze_bn = False, data_loader = None, name='tracker', **kwargs):
+class tracker(tf.keras.Model): #MSDS
+    def __init__(self, mask = True, freeze_bkbn = True, freeze_bn = False, data_loader = None, name='tracker', **kwargs):
         super(tracker, self).__init__(name=name, **kwargs)
         
-        self.nID = 57398
+        self.nID = 972
+        self.mask = mask
         if data_loader is not None:
             self.ds = data_loader
             self.train_ds = self.ds.train_ds
@@ -99,57 +109,98 @@ class tracker(tf.keras.Model):
         #PANET LIKE
         self.neck = fpn()
         #YOLO LIKE
-        self.head = rpn()
-        
+        self.head = rpn() 
+        self.proposal = ProposalLayer()
+                
         self.classifier = tf.keras.layers.Dense(self.nID) if self.nID>0 else None
         self.classifier.build((tf.newaxis,self.emb_dim))
-        self.s_c = tf.Variable(initial_value=[-4.15], trainable=True) 
-        self.s_r = tf.Variable(initial_value=[-4.85], trainable=True)
-        self.s_id = tf.Variable(initial_value=[-2.3], trainable=True)
+        self.s_c = tf.Variable(initial_value=[0.0], trainable=True) #-4.15
+        self.s_r = tf.Variable(initial_value=[0.0], trainable=True) # -4.85
+        self.s_id = tf.Variable(initial_value=[0.0], trainable=True) # -2.3
         
+        if self.mask:
+            
+            self.fpn_classifier = fpn_classifier_AFP()            
+            self.fpn_mask = fpn_mask_AFP()
+            self.s_mc = tf.Variable(initial_value=[0.0], trainable=True) 
+            self.s_mr = tf.Variable(initial_value=[0.0], trainable=True)
+            self.s_mm = tf.Variable(initial_value=[0.0], trainable=True)
+            
     def call(self, input_layers, training=False, inferring=False):
-        b = self.bkbn(input_layers, training)
-        n = self.neck(b, training)
-        h = self.head(n, training, inferring)
-        if training and inferring:
-            # we havefor each level proposals for each image in the batch, thus to be more flexible we transpose the list of lists
-            # pythonic transpose list of list of irregular size: [[image1 - fpn1, image2 - fpn1, ..], [image1 - fpn2], [image2 - fpn2], ..]
-            l = [len(i) for i in h]
-            h = [[i[o] for ix, i in enumerate(h) if l[ix] > o] for o in range(max(l))] 
-            h = [tf.concat(p, axis=0) for p in h] # concat proposals from all levels for each image in batch
-        return h
+        features = self.bkbn(input_layers, training)
+        pyramid = self.neck(features, training)
+        rpn_pred, rpn_embeddings = self.head(pyramid, training, inferring) # (proposal, embedding),...(proposal_embedding) for each piramid level
+        rpn_proposals = self.proposal(rpn_pred, training, inferring)[...,:4] # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
+        if self.mask:
+            mrcnn_class_logits, mrcnn_class, mrcnn_bbox = self.fpn_classifier([rpn_proposals,rpn_embeddings])
+            mrcnn_mask = self.fpn_mask([rpn_proposals,rpn_embeddings])
+            return rpn_pred, rpn_embeddings, rpn_proposals, mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask
+        else:
+            return rpn_pred, rpn_embeddings, rpn_proposals
     
+    def get_input_shape(self):
+        return tf.zeros((cfg.BATCH,cfg.TRAIN_SIZE,cfg.TRAIN_SIZE, 3))
+    
+    def get_output_shape(self):
+        return [out.shape for out in self.call(self.get_input_shape())]
+        
     def train_step(self, data):
         self.step_train += 1
         training = True
         inferring = False
-        image, *labels = data
+        image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+        labels = [label_2, labe_3, label_4, label_5]
         with tf.GradientTape() as tape:
-            preds = self(image, training=training, inferring=inferring)
-            self.total_loss = [] 
-            self.box_loss = []
-            self.conf_loss = []
-            self.id_loss = []
-            for label, (pred, emb) in zip(labels, preds):
-                loss, lbox, lconf, lid = self.compute_loss(label, pred, emb, training)
-                self.total_loss.append(loss)
-                self.box_loss.append(lbox)
-                self.conf_loss.append(lconf)
-                self.id_loss.append(lid)
-            self.mean_total_loss = tf.reduce_mean(tf.concat(self.total_loss, axis=0),axis=0)
-            self.mean_box_loss = tf.reduce_mean(tf.concat(self.box_loss, axis=0),axis=0)
-            self.mean_conf_loss = tf.reduce_mean(tf.concat(self.conf_loss, axis=0),axis=0)
-            self.mean_id_loss = tf.reduce_mean(tf.concat(self.id_loss, axis=0),axis=0)
-            trainable_vars = self.trainable_variables
-            gradients = tape.gradient(self.mean_total_loss, trainable_vars)
-            self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+            if self.mask:
+                preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
+                target_class_ids, target_bbox, target_masks = self.preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+                self.mean_total_loss = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+            else:
+                preds, embs, proposals = self(image, training=training, inferring=inferring)
+                self.mean_total_loss = self.compute_loss_rpn(labels, preds, embs, training)
+            
+            gradients = tape.gradient(self.mean_total_loss, self.trainable_variables)
+            self.optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, self.trainable_variables) if grad is not None)
             self.loss_summary(training)
-        tf.print("=> STEP %4d/%4d   lr: %.6f   mean_box_loss: %4.2f   mean_conf_loss: %4.2f   "
-                     "mean_id_loss: %4.2f   mean_total_loss: %4.2f" % (self.step_train, self.step_trains, \
-                                                             self.optimizer.lr.numpy(), self.mean_box_loss, \
-                                                             self.mean_conf_loss, self.mean_id_loss, self.mean_total_loss))
+        if self.mask:
+            tf.print("=> STEP %4d/%4d   lr: %.6f   mean_box_loss: %4.2f   mean_conf_loss: %4.2f   "
+                         "mean_id_loss: %4.2f  mrcnn_class_loss: %4.2f  mrcnn_box_loss: %4.2f   mrcnn_mask_loss: %4.2f   mean_total_loss: %4.2f" % (self.step_train, self.step_trains, \
+                                                                 self.optimizer.lr.numpy(), self.mean_box_loss, \
+                                                                 self.mean_conf_loss, self.mean_id_loss, self.mrcnn_class_loss, self.mrcnn_box_loss, self.mrcnn_mask_loss, self.mean_total_loss))
+        else:
+            tf.print("=> STEP %4d/%4d   lr: %.6f   mean_box_loss: %4.2f   mean_conf_loss: %4.2f   "
+                         "mean_id_loss: %4.2f  mean_total_loss: %4.2f" % (self.step_train, self.step_trains, \
+                                                                 self.optimizer.lr.numpy(), self.mean_box_loss, \
+                                                                 self.mean_conf_loss, self.mean_id_loss, self.mean_total_loss))
+            
+                        
+    def compute_loss(self, labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
+        # rpn loss        
+        loss = self.compute_loss_rpn(labels, preds, embs, training)
+        # mrcnn loss
+        loss += self.compute_loss_mrcnn(target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks)
+        loss *= 0.5
+        return loss
+    
+    def compute_loss_rpn(self, labels, preds, embs, training):
+        mean_box_loss = []
+        mean_conf_loss = []
+        mean_id_loss = []
+        for label, pred, emb in zip(labels, preds, embs):
+            lbox, lconf, lid = self.compute_loss_rpn_level(label, pred, emb, training)
+            mean_box_loss.append(lbox)
+            mean_conf_loss.append(lconf)
+            mean_id_loss.append(lid)
+        
+        self.mean_box_loss, self.mean_conf_loss, self.mean_id_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0), tf.reduce_mean(mean_id_loss,axis=0)
+        
+        loss = tf.math.exp(-self.s_r)*self.mean_box_loss + tf.math.exp(-self.s_c)*self.mean_conf_loss \
+                    + tf.math.exp(-self.s_id)*self.mean_id_loss + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing        
+
+        return loss
+
 #    @tf.function
-    def compute_loss(self, label, pred, emb, training):
+    def compute_loss_rpn_level(self, label, pred, emb, training):
         pbox = pred[..., :4]
         pconf = pred[..., 4:6]
         tbox = label[...,:4]
@@ -165,45 +216,190 @@ class tracker(tf.keras.Model):
         tids = tids[emb_mask]
         embedding = emb[emb_mask]
         embedding = self.emb_scale * tf.math.l2_normalize(embedding,axis=1, epsilon=1e-12)
-        logits = self.classifier(embedding)
+        logits = self.classifier(embedding) 
         logits = self.entry_stop_gradients(logits,tids<0)
         tids = tf.cast(tf.where(tf.less(tids, 0.0), 0.0, tids),tf.int32) # stop gradient for regions labeled -1
         lid = self.CrossEntropyLossLogits(tf.squeeze(tids),logits)
         self.classifier_summary(embedding, training)
-        loss = tf.math.exp(-self.s_r)*lbox + tf.math.exp(-self.s_c)*lconf \
-                + tf.math.exp(-self.s_id)*lid + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing
-        loss *= 0.5
-        return loss, lbox, lconf, lid
+        return lbox, lconf, lid
+ 
+    def preprocess_mrcnn(self, proposals, gt_bboxes, gt_masks):
+        gt_bboxes = gt_bboxes[...,:4]
+        gt_bboxes /= cfg.TRAIN_SIZE
+        gt_bboxes = xyxy2xywh(gt_bboxes)
+        nB, nP, _ = proposals.shape
+        proposals = xyxy2xywh(proposals)
+        gt_intersect = tf.TensorArray(tf.float32, size=nB)
+        for i in range(nB):
+            gt_intersect = gt_intersect.write(i,bbox_iou(proposals[i],gt_bboxes[i]))
+        gt_intersect = gt_intersect.stack()
+        gt_indices =  tf.cast(tf.math.argmax(gt_intersect,axis=-1),tf.int32)
+        target_bbox = tf.TensorArray(tf.float32, size=nB)
+        target_masks = tf.TensorArray(tf.float32, size=nB)
+        for i in range(nB):
+            target_bbox = target_bbox.write(i,tf.where(proposals[i]==0.0,0.0, encode_delta(proposals[i], tf.gather(gt_bboxes[i],gt_indices[i],axis=0))))
+            target_masks = target_masks.write(i,tf.where(tf.tile((tf.reduce_sum(proposals[i],axis=-1)==0.0)[...,None,None],(1,28,28)),0.0,tf.gather(gt_masks[i],gt_indices[i],axis=0)))
+        target_bbox = target_bbox.stack()
+        target_masks = target_masks.stack()
+        target_class_ids = tf.where(tf.reduce_sum(target_bbox,axis=-1)>0, 1, 0) # in this dataset if there is bbox, it's human, 1 class
+        return target_class_ids, target_bbox, target_masks
+
+#    @tf.function
+    def compute_loss_mrcnn(self, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks):
+        # prepare the ground truth
+        self.mrcnn_class_loss = self.mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
+        self.mrcnn_box_loss = self.mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
+        self.mrcnn_mask_loss = self.mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
+
+        loss = tf.math.exp(-self.s_mc)*self.mrcnn_class_loss + tf.math.exp(-self.s_mr)*self.mrcnn_box_loss \
+                + tf.math.exp(-self.s_mm)*self.mrcnn_mask_loss + (self.s_mr + self.s_mc + self.s_mm) #Automatic Loss Balancing        
+        
+        return loss
+        
+    def mrcnn_class_loss_graph(self,target_class_ids, pred_class_logits):
+        """Loss for the classifier head of Mask RCNN.
+        target_class_ids: [batch, num_rois]. Integer class IDs. Uses zero
+            padding to fill in the array.
+        pred_class_logits: [batch, num_rois, num_classes]
+        active_class_ids: [batch, num_classes]. Has a value of 1 for
+            classes that are in the dataset of the image, and 0
+            for classes that are not in the dataset.
+            active_class_ids = tf.concat([tf.zeros((nB,1)),tf.ones((nB,1))],axis=-1)
+        """
+        # During model building, Keras calls this function with
+        # target_class_ids of type float32. Unclear why. Cast it
+        # to int to get around it.
+        target_class_ids = tf.cast(target_class_ids, 'int32')
+        # Find predictions of classes that are not in the dataset.
+        #pred_class_ids = tf.argmax(pred_class_logits, axis=2)
+        # TODO: Update this line to work with batch > 1. Right now it assumes all
+        #       images in a batch have the same active_class_ids
+        #pred_active = tf.gather(active_class_ids[0], pred_class_ids)
     
+        # # Loss
+        pred_class_logits = tf.math.l2_normalize(pred_class_logits,axis=-1, epsilon=1e-12) #?
+
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
+    
+        # Erase losses of predictions of classes that are not in the active
+        # classes of the image.
+#        loss = loss #* pred_active
+    
+        # Computer loss mean. Use only predictions that contribute
+        # to the loss to get a correct mean.
+        loss = tf.reduce_sum(loss) #/ tf.reduce_sum(pred_active)
+        return loss
+
+    def smooth_l1_loss(self,y_true, y_pred):
+        """Implements Smooth-L1 loss.
+        y_true and y_pred are typically: [N, 4], but could be any shape.
+        """
+        diff = tf.keras.backend.abs(y_true - y_pred)
+        less_than_one = tf.keras.backend.cast(tf.keras.backend.less(diff, 1.0), "float32")
+        loss = (less_than_one * 0.5 * diff ** 2) + (1 - less_than_one) * (diff - 0.5)
+        return loss
+    
+    def mrcnn_bbox_loss_graph(self,target_bbox, target_class_ids, pred_bbox):
+        """Loss for Mask R-CNN bounding box refinement.
+        target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
+        target_class_ids: [batch, num_rois]. Integer class IDs.
+        pred_bbox: [batch, num_rois, num_classes, (dx, dy, log(dw), log(dh))]
+        """
+        # Reshape to merge batch and roi dimensions for simplicity.
+        target_class_ids = tf.reshape(target_class_ids, (-1,))
+        target_bbox = tf.reshape(target_bbox, (-1, 4))
+        pred_bbox = tf.reshape(pred_bbox, (-1, tf.shape(pred_bbox)[2], 4))
+    
+        # Only positive ROIs contribute to the loss. And only
+        # the right class_id of each ROI. Get their indices.
+        positive_roi_ix = tf.where(target_class_ids > 0)[:, 0]
+        positive_roi_class_ids = tf.cast(
+            tf.gather(target_class_ids, positive_roi_ix), tf.int64)
+        indices = tf.stack([positive_roi_ix, positive_roi_class_ids], axis=1)
+    
+        # Gather the deltas (predicted and true) that contribute to loss
+        target_bbox = tf.gather(target_bbox, positive_roi_ix)
+        pred_bbox = tf.gather_nd(pred_bbox, indices)
+        # Smooth-L1 Loss
+        if tf.size(target_bbox) > 0:
+            loss = self.smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox)
+        else:
+            loss = tf.constant(0.0)
+#        loss = tf.keras.backend.switch(tf.size(target_bbox) > 0,
+#                        self.smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox),
+#                        tf.constant(0.0))
+        loss = tf.reduce_mean(loss)
+        return loss
+    
+    
+    def mrcnn_mask_loss_graph(self,target_masks, target_class_ids, pred_masks):
+        """Mask binary cross-entropy loss for the masks head.
+        target_masks: [batch, num_rois, height, width].
+            A float32 tensor of values 0 or 1. Uses zero padding to fill array.
+        target_class_ids: [batch, num_rois]. Integer class IDs. Zero padded.
+        pred_masks: [batch, proposals, height, width, num_classes] float32 tensor
+                    with values from 0 to 1.
+        """
+        # Reshape for simplicity. Merge first two dimensions into one.
+        target_class_ids = tf.reshape(target_class_ids, (-1,))
+        mask_shape = tf.shape(target_masks)
+        target_masks = tf.reshape(target_masks, (-1, mask_shape[2], mask_shape[3]))
+        pred_shape = tf.shape(pred_masks)
+        pred_masks = tf.reshape(pred_masks,
+                               (-1, pred_shape[2], pred_shape[3], pred_shape[4]))
+        # Permute predicted masks to [N, num_classes, height, width]
+        pred_masks = tf.transpose(pred_masks, [0, 3, 1, 2])
+    
+        # Only positive ROIs contribute to the loss. And only
+        # the class specific mask of each ROI.
+        positive_ix = tf.where(target_class_ids > 0)[:, 0]
+        positive_class_ids = tf.cast(
+            tf.gather(target_class_ids, positive_ix), tf.int64)
+        indices = tf.stack([positive_ix, positive_class_ids], axis=1)
+    
+        # Gather the masks (predicted and true) that contribute to loss
+        y_true = tf.gather(target_masks, positive_ix)
+        y_pred = tf.gather_nd(pred_masks, indices)
+    
+        # Compute binary cross entropy. If no positive ROIs, then return 0.
+        # shape: [batch, roi, num_classes]
+        if tf.size(y_true) > 0:
+            loss =tf.keras.losses.BinaryCrossentropy()(y_true, y_pred)
+        else:
+            loss = tf.constant(0.0)
+#        loss = tf.keras.backend.switch(tf.size(y_true) > 0,
+#                        tf.keras.backend.binary_crossentropy(target=y_true, output=y_pred),
+#                        tf.constant(0.0))
+        loss = tf.reduce_mean(loss)
+        return loss
+
+        
     def entry_stop_gradients(self,target, mask):
         mask_neg = tf.math.logical_not(mask)
         return tf.stop_gradient(tf.cast(mask,tf.float32) * target) + tf.cast(mask_neg,tf.float32) * target
 
     def test_step(self, data):
         self.step_val += 1
-        training = True
+        training = False
         inferring = False
-        image, *labels = data
-        preds = self(image, training=training, inferring=inferring)
-        self.total_loss = [] 
-        self.box_loss = []
-        self.conf_loss = []
-        self.id_loss = []
-        for label, (pred, emb) in zip(labels, preds):
-            loss, lbox, lconf, lid = self.compute_loss(label, pred, emb, training)
-            self.total_loss.append(loss)
-            self.box_loss.append(lbox)
-            self.conf_loss.append(lconf)
-            self.id_loss.append(lid)
-        self.mean_total_loss = tf.reduce_mean(tf.concat(self.total_loss, axis=0),axis=0)
-        self.mean_box_loss = tf.reduce_mean(tf.concat(self.box_loss, axis=0),axis=0)
-        self.mean_conf_loss = tf.reduce_mean(tf.concat(self.conf_loss, axis=0),axis=0)
-        self.mean_id_loss = tf.reduce_mean(tf.concat(self.id_loss, axis=0),axis=0) 
-        self.loss_summary(training)
-        tf.print("=> STEP %4d   mean_box_loss: %4.2f   mean_conf_loss: %4.2f   "
-                     "mean_id_loss: %4.2f   mean_total_loss: %4.2f" % (self.step_val, self.mean_box_loss, \
-                                                             self.mean_conf_loss, self.mean_id_loss, \
-                                                             self.mean_total_loss))
+        image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+        labels = [label_2, labe_3, label_4, label_5]
+        if self.mask:
+            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
+            target_class_ids, target_bbox, target_masks = self.preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+            self.mean_total_loss = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+        else:
+            preds, embs, proposals = self(image, training=training, inferring=inferring)
+            self.mean_total_loss = self.compute_loss_rpn(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+        if self.mask:
+            tf.print("=> STEP %4d   mean_box_loss: %4.2f   mean_conf_loss: %4.2f   "
+                         "mean_id_loss: %4.2f  mrcnn_class_loss: %4.2f  mrcnn_box_loss: %4.2f   mrcnn_mask_loss: %4.2f   mean_total_loss: %4.2f" % (self.step_train, self.mean_box_loss, \
+                                                                 self.mean_conf_loss, self.mean_id_loss, self.mrcnn_class_loss, self.mrcnn_box_loss, self.mrcnn_mask_loss, self.mean_total_loss))
+        else:
+            tf.print("=> STEP %4d   mean_box_loss: %4.2f   mean_conf_loss: %4.2f   "
+                         "mean_id_loss: %4.2f  mean_total_loss: %4.2f" % (self.step_train, self.mean_box_loss, \
+                                                                 self.mean_conf_loss, self.mean_id_loss, self.mean_total_loss))
+            
     def fit(self, epochs = None, start_epoch = 0):
         assert self.ds is not None, 'please pass a DataLoader'
         if epochs is not None:
@@ -220,54 +416,70 @@ class tracker(tf.keras.Model):
             self.adapt_lr()
             for data in self.train_ds.take(self.steps_per_epoch*self.batch).batch(self.batch):
                 self.train_step(data)
-            self.save('./tracker_weights_'+str(self.epoch)+'.tf')
+            self.save('./weights/tracker_weights_'+str(self.epoch)+'.tf')
             gc.collect()
-            for data in self.val_ds.take(100*self.batch).batch(self.batch):
+            for data in self.val_ds.take(10*self.batch).batch(self.batch):
                 self.test_step(data)               
             gc.collect()
     
+    # TODO
     def infer(self, image):
         training = True
         inferring = True
-        proposals = self(image, training=training, inferring=inferring)
+        preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training, inferring=inferring)
+#        proposals = nms_proposals(proposals)
         if len(proposals)==0:
             tf.print('None')
         for i,proposal in enumerate(proposals):
             if len(proposal)>0:
                 bboxs = proposal[...,:4]
-                confs = proposal[...,4] 
-                embs = proposal[...,5:] # needed for tracking
+#                confs = proposal[...,4] 
+#                embs = proposal[...,5:] # needed for tracking
                 # Final proposals are obtained in dets. Information of bounding box and embeddings also included
-                self.draw_bbox(image[i], bboxs, confs)
+                self.draw_bbox(image[i], bboxs)
     #            detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:4]), tlbrs[4], f.numpy(), 30) for
     #                          (tlbrs, f) in zip(dets[:, :5], dets[:, 6:])]
             else:
     #            detections = []
                 tf.print('None')
-                
-    def draw_bbox(self,image, bboxs, conf_id):
+    
+    # TODO      
+    def draw_bbox(self,image, bboxs, conf_id=None):
         img = Image.fromarray(np.array(image.numpy()*255,dtype=np.uint8))                   
         draw = ImageDraw.Draw(img)   
+        if conf_id == None:
+            conf_id = tf.zeros_like(bboxs)[...,0]
         for bbox,conf in zip(bboxs.numpy(), conf_id.numpy()):
             draw.rectangle(bbox, outline ="red") 
             xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
-            draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("arial.ttf"))
+            draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"))
         img.show() 
-        
+#        plt.imshow(np.array(img))
+#        plt.show()
+    
     def loss_summary(self, training):
         with self.writer.as_default():
             scope = 'train' if training else 'val'
             step = self.step_train if training else self.step_val
             with tf.name_scope(scope):
                 with tf.name_scope('loss'):
-                    tf.summary.scalar("s_c", tf.squeeze(self.s_c), step=step)
-                    tf.summary.scalar("s_r", tf.squeeze(self.s_r), step=step)
-                    tf.summary.scalar("s_id", tf.squeeze(self.s_id), step=step)
-                    tf.summary.scalar("lr", self.optimizer.lr, step=self.step_train)
                     tf.summary.scalar("mean_total_loss", tf.squeeze(self.mean_total_loss), step=step)
-                    tf.summary.scalar("mean_box_loss", tf.squeeze(self.mean_box_loss), step=step)
-                    tf.summary.scalar("mean_conf_loss", tf.squeeze(self.mean_conf_loss), step=step)
-                    tf.summary.scalar("mean_id_loss", tf.squeeze(self.mean_id_loss), step=step)
+                    tf.summary.scalar("lr", self.optimizer.lr, step=self.step_train)
+                    with tf.name_scope('rpn'):
+                        tf.summary.scalar("s_c", tf.squeeze(self.s_c), step=step)
+                        tf.summary.scalar("s_r", tf.squeeze(self.s_r), step=step)
+                        tf.summary.scalar("s_id", tf.squeeze(self.s_id), step=step)
+                        tf.summary.scalar("mean_box_loss", tf.squeeze(self.mean_box_loss), step=step)
+                        tf.summary.scalar("mean_conf_loss", tf.squeeze(self.mean_conf_loss), step=step)
+                        tf.summary.scalar("mean_id_loss", tf.squeeze(self.mean_id_loss), step=step)
+                    if self.mask:
+                        with tf.name_scope('mrcnn'): 
+                            tf.summary.scalar("s_mc", tf.squeeze(self.s_mc), step=step)
+                            tf.summary.scalar("s_mr", tf.squeeze(self.s_mr), step=step)
+                            tf.summary.scalar("s_mm", tf.squeeze(self.s_mm), step=step)
+                            tf.summary.scalar("mrcnn_box_loss", tf.squeeze(self.mrcnn_box_loss), step=step)
+                            tf.summary.scalar("mrcnn_class_loss", tf.squeeze(self.mrcnn_class_loss), step=step)
+                            tf.summary.scalar("mrcnn_mask_loss", tf.squeeze(self.mrcnn_mask_loss), step=step)
         self.writer.flush()
         
     def classifier_summary(self, input_tensor, training):
@@ -346,4 +558,192 @@ class tracker(tf.keras.Model):
     def load(self, name):
         self.load_weights(name)
 
+class BatchNorm(tf.keras.layers.BatchNormalization):
+    """Extends the Keras BatchNormalization class to allow a central place
+    to make changes if needed.
+    Batch normalization has a negative effect on training if batches are small
+    so this layer is often frozen (via setting in Config class) and functions
+    as linear layer.
+    """
+    def call(self, inputs, training=None):
+        """
+        Note about training values:
+            None: Train BN layers. This is the normal mode
+            False: Freeze BN layers. Good when batch size is small
+            True: (don't use). Set layer in training mode even when making inferences
+        """
+        return super(self.__class__, self).call(inputs, training=training)
+#
+############################################################
+#  Feature Pyramid Network Heads
+############################################################
+class fpn_classifier_AFP(tf.keras.Model):
+    def __init__(self, name='fpn_classifier_AFP', **kwargs):
+        super(fpn_classifier_AFP, self).__init__(name=name, **kwargs)
+        self.model = self.build_graph()
+        
+    def call(self, input_layers, training=False):
+        return self.model(input_layers)
+    
+    def build_graph(self):
+        input_shape = self.get_input_shape()
+        return tf.keras.Model(inputs=input_shape, outputs=fpn_classifier_graph_AFP(input_shape))
+    
+    def get_input_shape(self):
+        return tf.keras.layers.Input((cfg.MAX_PROP, 4)), [tf.keras.layers.Input((cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], 
+                                        cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
+    def get_output_shape(self):
+        return [out.shape for out in self.call(self.get_input_shape())]
+        
+def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=1024):
+    """Builds the computation graph of the feature pyramid network classifier
+    and regressor heads.
+    rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
+          coordinates.
+    feature_maps: List of feature maps from different layers of the pyramid,
+                  [P2, P3, P4, P5]. Each has a different resolution.
+    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    pool_size: The width of the square feature map generated from ROI Pooling.
+    num_classes: number of classes, which determines the depth of the results
+    train_bn: Boolean. Train or freeze Batch Norm layers
+    fc_layers_size: Size of the 2 FC layers
+    Returns:
+        logits: [batch, num_rois, NUM_CLASSES] classifier logits (before softmax)
+        probs: [batch, num_rois, NUM_CLASSES] classifier probabilities
+        bbox_deltas: [batch, num_rois, NUM_CLASSES, (dx, dy, log(dw), log(dh))] Deltas to apply to
+                     proposal boxes
+    """
+#    rois, feature_maps = inputs[0], inputs[1]
+    # ROI Pooling
+    # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
+    x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_classifier")(inputs)
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp2_gn')(x2)
+    x2 = tf.keras.layers.Activation('relu', name='roi_class_afp2_gn_relu')(x2)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp3_gn')(x3)
+    x3 = tf.keras.layers.Activation('relu', name='roi_class_afp3_gn_relu')(x3)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp4_gn')(x4)
+    x4 = tf.keras.layers.Activation('relu', name='roi_class_afp4_gn_relu')(x4)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp5_gn')(x5)
+    x5 = tf.keras.layers.Activation('relu', name='roi_class_afp5_gn_relu')(x5)
+
+    x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv1")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv1_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv1_gn_relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv2")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv2_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv2_gn_relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv3")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv3_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv3_gn_relu')(x)
+
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
+                           name="mrcnn_class_shared")(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
+    shared = tf.keras.layers.Lambda(lambda x: tf.keras.backend.squeeze(tf.keras.backend.squeeze(x, 3), 2),
+                       name="pool_squeeze")(x)
+
+    # Classifier head
+    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes),
+                                            name='mrcnn_class_logits')(shared)
+    mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),
+                                     name="mrcnn_class")(mrcnn_class_logits)
+
+    # BBox head
+    # [batch, num_rois, NUM_CLASSES * (dx, dy, log(dw), log(dh))]
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes * 4, activation='linear'),
+                           name='mrcnn_bbox_fc')(shared)
+    # Reshape to [batch, num_rois, NUM_CLASSES, (dx, dy, log(dw), log(dh))]
+    s = tf.keras.backend.int_shape(x)
+    mrcnn_bbox = tf.keras.layers.Reshape((s[1], num_classes, 4), name="mrcnn_bbox")(x)
+
+    return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
+
+class fpn_mask_AFP(tf.keras.Model):
+    def __init__(self, name='fpn_mask_AFP', **kwargs):
+        super(fpn_mask_AFP, self).__init__(name=name, **kwargs)
+        self.model = self.build_graph()
+        
+    def call(self, input_layers, training=False):
+        return self.model(input_layers)
+    
+    def build_graph(self):
+        input_shape = self.get_input_shape()
+        return tf.keras.Model(inputs=input_shape, outputs=build_fpn_mask_graph_AFP(input_shape))
+    
+    def get_input_shape(self):
+        return tf.keras.layers.Input((cfg.MAX_PROP, 4)), [tf.keras.layers.Input((cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], 
+                                        cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
+    def get_output_shape(self):
+        return self.call(self.get_input_shape()).shape
+    
+def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=2):
+    """Builds the computation graph of the mask head of Feature Pyramid Network.
+    rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
+          coordinates.
+    feature_maps: List of feature maps from different layers of the pyramid,
+                  [P2, P3, P4, P5]. Each has a different resolution.
+    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    pool_size: The width of the square feature map generated from ROI Pooling.
+    num_classes: number of classes, which determines the depth of the results
+    train_bn: Boolean. Train or freeze Batch Norm layers
+    Returns: Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
+    """
+#    rois, feature_maps = inputs[0], inputs[1]
+    # ROI Pooling
+    # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
+    x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_mask")(inputs)
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp2_gn')(x2)
+    x2 = tf.keras.layers.Activation('relu', name='roi_mask_afp2_gn_relu')(x2)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp3_gn')(x3)
+    x3 = tf.keras.layers.Activation('relu', name='roi_mask_afp3_gn_relu')(x3)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp4_gn')(x4)
+    x4 = tf.keras.layers.Activation('relu', name='roi_mask_afp4_gn_relu')(x4)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp5_gn')(x5)
+    x5 = tf.keras.layers.Activation('relu', name='roi_mask_afp5_gn_relu')(x5)
+
+    x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv1")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn1')(x)
+    x = tf.keras.layers.Activation('relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv2")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn2')(x)
+    shared = tf.keras.layers.Activation('relu')(x)
+
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv3")(shared)
+    x_fcn = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn3')(x_fcn)
+    x_fcn = tf.keras.layers.Activation('relu')(x_fcn)
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2DTranspose(cfg.EMB_DIM, (2, 2), strides=(2, 2), activation="relu"),
+                           name="mrcnn_mask_deconv")(x_fcn)
+
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv4")(shared)
+    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn4')(x_ff)
+    x_ff = tf.keras.layers.Activation('relu')(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM//2, (3, 3), padding="same"),
+                              name="mrcnn_mask_conv5")(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn5')(x_ff)
+    x_ff = tf.keras.layers.Activation('relu')(x_ff)
+    x_ff_shape = tf.keras.backend.int_shape(x_ff)
+    x_ff = tf.keras.layers.Reshape((x_ff_shape[1], x_ff_shape[2]*x_ff_shape[3]*x_ff_shape[4]))(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(pool_size*pool_size*2*2, activation='relu'), name='mrcnn_mask_fc')(x_ff)
+
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(num_classes, (1, 1), strides=1), name="mrcnn_mask_fcn")(x_fcn)
+    x_ff = tf.keras.layers.Reshape((x_ff_shape[1], pool_size*2, pool_size*2, 1))(x_ff)
+    x_ff = tf.keras.layers.Lambda(lambda x: tf.tile(x, (1, 1, 1, 1, num_classes)))(x_ff)
+    x = tf.keras.layers.Add()([x_fcn, x_ff])
+    x = tf.keras.layers.Activation('sigmoid', name='mrcnn_mask')(x)
+
+    return x
 

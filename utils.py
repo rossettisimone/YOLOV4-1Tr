@@ -22,6 +22,18 @@ def file_writer(file, file_name):
     with open(file_name, 'w') as f:
         f.write(json.dumps(file)) 
 
+def image_preprocess(self, image, target_size): # for test
+    ih, iw    = target_size
+    h,  w, _  = image.shape
+    scale = min(iw/w, ih/h)
+    nw, nh  = int(scale * w), int(scale * h)    
+    image = Image.fromarray(image)
+    image_resized = image.resize((nw, nh),Image.ANTIALIAS)
+    image_paded = np.full(shape=[ih, iw, 3], fill_value=128.0)
+    dw, dh = (iw - nw) // 2, (ih-nh) // 2
+    image_paded[dh:nh+dh, dw:nw+dw, :] = image_resized
+    image_paded = image_paded / 255.
+    return image_paded
 
 def imm_resize(img):
     imgx = img.resize((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), Image.ANTIALIAS)
@@ -33,9 +45,9 @@ def mask_resize(img, width=cfg.TRAIN_SIZE, height=cfg.TRAIN_SIZE):
     return np.array(imgx,dtype=np.uint8)
 
 def mask_clamp(mask):
-    if np.any(mask>1):
-        mask[mask==1]=0
-        mask = np.clip(mask,0,1)
+    if np.any(mask>1): # CDCL RETURN VALUES FROM 0 TO 7 FOR 0 - BACKGROUND, 1 - BOXES, 2 - HEADS, ARMS, LEGS..
+        mask[mask==1]=0 # SET BOX LABEL TO 0
+    mask = np.clip(mask,0,1)
     return np.array(mask,dtype=np.float32)
 
 def img_tranfrom(img, bbox):
@@ -125,104 +137,44 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
     b2_area = tf.broadcast_to(tf.reshape((b2_x2 - b2_x1) * (b2_y2 - b2_y1),(1,-1)),[N,M])
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
-    
-#def return_torch_unique_index(u, uv):
-#    n = uv.shape[1]  # number of columns
-#    first_unique = torch.zeros(n, device=u.device).long()
-#    for j in range(n):
-#        first_unique[j] = (uv[:, j:j + 1] == u).all(0).nonzero()[0]
-#
-#    return first_unique
-#import torch
-#def build_targets_max(target, anchor_wh, nA, nC, nGh, nGw):
-#    """
-#    returns nT, nCorrect, tx, ty, tw, th, tconf, tcls
-#    """
-#    nB = len(target)  # number of images in batch
-#
-#    txy = torch.zeros(nB, nA, nGh, nGw, 2).cuda()  # batch size, anchors, grid size
-#    twh = torch.zeros(nB, nA, nGh, nGw, 2).cuda()
-#    tconf = torch.LongTensor(nB, nA, nGh, nGw).fill_(0).cuda()
-#    tcls = torch.ByteTensor(nB, nA, nGh, nGw, nC).fill_(0).cuda()  # nC = number of classes
-#    tid = torch.LongTensor(nB, nA, nGh, nGw, 1).fill_(-1).cuda() 
-#    for b in range(nB):
-#        t = target[b]
-#        t_id = t[:, 1].clone().long().cuda()
-#        t = t[:,[0,2,3,4,5]]
-#        nTb = len(t)  # number of targets
-#        if nTb == 0:
-#            continue
-#
-#        #gxy, gwh = t[:, 1:3] * nG, t[:, 3:5] * nG
-#        gxy, gwh = t[: , 1:3].clone() , t[:, 3:5].clone()
-#        gxy[:, 0] = gxy[:, 0] * nGw
-#        gxy[:, 1] = gxy[:, 1] * nGh
-#        gwh[:, 0] = gwh[:, 0] * nGw
-#        gwh[:, 1] = gwh[:, 1] * nGh
-#        gi = torch.clamp(gxy[:, 0], min=0, max=nGw -1).long()
-#        gj = torch.clamp(gxy[:, 1], min=0, max=nGh -1).long()
-#
-#        # Get grid box indices and prevent overflows (i.e. 13.01 on 13 anchors)
-#        #gi, gj = torch.clamp(gxy.long(), min=0, max=nG - 1).t()
-#        #gi, gj = gxy.long().t()
-#
-#        # iou of targets-anchors (using wh only)
-#        box1 = gwh
-#        box2 = anchor_wh.unsqueeze(1)
-#        inter_area = torch.min(box1, box2).prod(2)
-#        iou = inter_area / (box1.prod(1) + box2.prod(2) - inter_area + 1e-16)
-#
-#        # Select best iou_pred and anchor
-#        iou_best, a = iou.max(0)  # best anchor [0-2] for each target
-#
-#        # Select best unique target-anchor combinations
-#        if nTb > 1:
-#            _, iou_order = torch.sort(-iou_best)  # best to worst
-#
-#            # Unique anchor selection
-#            u = torch.stack((gi, gj, a), 0)[:, iou_order]
-#            # _, first_unique = np.unique(u, axis=1, return_index=True)  # first unique indices
-#            first_unique = return_torch_unique_index(u, torch.unique(u, dim=1))  # torch alternative
-#            i = iou_order[first_unique]
-#            # best anchor must share significant commonality (iou) with target
-#            i = i[iou_best[i] > 0.60]  # TODO: examine arbitrary threshold
-#            if len(i) == 0:
-#                continue
-#
-#            a, gj, gi, t = a[i], gj[i], gi[i], t[i]
-#            t_id = t_id[i]
-#            if len(t.shape) == 1:
-#                t = t.view(1, 5)
-#        else:
-#            if iou_best < 0.60:
-#                continue
-#        
-#        tc, gxy, gwh = t[:, 0].long(), t[:, 1:3].clone(), t[:, 3:5].clone()
-#        gxy[:, 0] = gxy[:, 0] * nGw
-#        gxy[:, 1] = gxy[:, 1] * nGh
-#        gwh[:, 0] = gwh[:, 0] * nGw
-#        gwh[:, 1] = gwh[:, 1] * nGh
-#
-#        # XY coordinates
-#        txy[b, a, gj, gi] = gxy - gxy.floor()
-#
-#        # Width and height
-#        twh[b, a, gj, gi] = torch.log(gwh / anchor_wh[a])  # yolo method
-#        # twh[b, a, gj, gi] = torch.sqrt(gwh / anchor_wh[a]) / 2 # power method
-#
-#        # One-hot encoding of label
-#        tcls[b, a, gj, gi, tc] = 1
-#        tconf[b, a, gj, gi] = 1
-#        tid[b, a, gj, gi] = t_id.unsqueeze(1)
-#    tbox = torch.cat([txy, twh], -1)
-#    return tconf, tbox, tid
+           
+def get_top_proposals(batch_proposals):
+    nB = tf.shape(batch_proposals)[0]
+    top_proposals = tf.TensorArray(tf.float32, size=nB)
+    for i in range(nB):
+        pred = batch_proposals[i]
+        pred = pred[pred[..., 4] > cfg.CONF_THRESH]
+        indices = tf.argsort(pred[..., 4], axis=-1, direction='DESCENDING')[:cfg.MAX_PRED]
+        pred = tf.gather(pred,indices)
+        pred = tf.pad(pred,paddings=[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
+        top_proposals = top_proposals.write(i,pred)
+    top_proposals = top_proposals.stack()
+    return top_proposals
 
+def nms_proposals(batch_proposals):
+    nB = tf.shape(batch_proposals)[0]
+    nms_proposals = tf.TensorArray(tf.float32, size=nB)
+    for i in range(nB): # batch images
+        pred = batch_proposals[i]
+        pred = pred[pred[...,4] > cfg.CONF_THRESH] # remove zeros (speed non max suppress)
+        if len(pred) > 0: 
+            pred = tf.concat([xywh2xyxy(pred[...,:4]),pred[...,4:]],axis=-1) # to bbox
+            indices = tf.image.non_max_suppression(
+                                 pred[...,:4], pred[...,4], max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,
+                                score_threshold=cfg.CONF_THRESH
+                            )
+            pred = tf.gather(pred, indices) #b x n rois x (4+1+1+208)
+            nms_proposals = nms_proposals.write(i,tf.pad(pred,paddings=[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0))
+        else:
+            nms_proposals = nms_proposals.write(i,tf.zeros((cfg.MAX_PROP,tf.shape(pred)[-1]),dtype=tf.float32))
+    nms_proposals = nms_proposals.stack()
+    return nms_proposals
 
 def xyxy2xywh(xyxy):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
     # x, y are coordinates of center 
     # (x1, y1) and (x2, y2) are coordinates of bottom left and top right respectively. 
-    xy = (xyxy[...,:2]+xyxy[...,2:4])/2
+    xy = (xyxy[...,:2]+xyxy[...,2:4])*0.5
     wh = (xyxy[...,2:4]-xyxy[...,:2])
     return tf.concat([xy,wh],axis=-1)
 
@@ -237,9 +189,6 @@ def xywh2xyxy(xywh):
 
 
 def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
-    ID_THRESH = 0.2
-    FG_THRESH = 0.2
-    BG_THRESH = 0.1
     assert(tf.shape(anchor_wh)[0]==nA)
     target = tf.constant(target, dtype=tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
@@ -262,10 +211,10 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
     iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
     
-    id_index = iou_map > ID_THRESH
-    fg_index = iou_map > FG_THRESH                                                    
-    bg_index = iou_map < BG_THRESH 
-    ign_index = tf.cast(tf.cast((iou_map < FG_THRESH),tf.float32) * tf.cast((iou_map > BG_THRESH),tf.float32),tf.bool)
+    id_index = iou_map > cfg.ID_THRESH
+    fg_index = iou_map > cfg.FG_THRESH                                                    
+    bg_index = iou_map < cfg.BG_THRESH 
+    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
     tconf = tf.where(fg_index, 1, tconf)
     tconf = tf.where(bg_index, 0, tconf)
     tconf = tf.where(ign_index, -1, tconf)
@@ -323,7 +272,8 @@ def decode_delta_map(delta_map, anchors):
     :param: delta_map, shape (nB, nA, nGh, nGw, 4)
     :param: anchors, shape (nA,4)
     '''
-    nB, nA, nGh, nGw, _ = delta_map.shape
+    _, nA, nGh, nGw, _ = delta_map.shape
+    nB = tf.shape(delta_map)[0] # error in building if None
     anchor_mesh = generate_anchor(nGh, nGw, anchors) 
     anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))              # Shpae (nA x nGh x nGw) x 4
     anchor_mesh = tf.tile(anchor_mesh[tf.newaxis],(nB,1,1,1,1))
