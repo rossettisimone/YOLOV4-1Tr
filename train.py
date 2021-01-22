@@ -28,7 +28,7 @@ from loader import DataLoader
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/writer --port 6006
     
 ds = DataLoader()
-model = tracker(data_loader = ds)
+model = tracker(data_loader = ds, mask = True)
 model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
