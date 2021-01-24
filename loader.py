@@ -97,7 +97,7 @@ class Generator(object):
                 xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
                 box=np.array([min(xx),min(yy),max(xx),max(yy)])
             if not np.all(box==0):
-                box = np.r_[box,1]*np.array([width, height, width, height, person['p_id_2']])
+                box = np.r_[box,1]*np.array([width, height, width, height, person['p_id']]) #person['p_id_2']])
                 try:
                      mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))
                 except:
@@ -195,32 +195,32 @@ class DataLoader(Generator):
         self.nID = 1
         self.shuffle=shuffle
         
-        if cfg.DATASET_TYPE == 'kinetics':
-            for i,k in enumerate(self.json_dataset):
-                for j,_ in enumerate(k['p_l']):
-                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.nID
-                    self.nID += 1
-        elif cfg.DATASET_TYPE == 'ava':
-            self.max_id_in_video = {}
-            for i,k in enumerate(self.json_dataset):
-                for j,_ in enumerate(k['p_l']):
-                    try:
-                        if self.json_dataset[i]['p_l'][j]['p_id'] > self.max_id_in_video[self.json_dataset[i]['v_id']]:
-                            self.max_id_in_video[self.json_dataset[i]['v_id']] = self.json_dataset[i]['p_l'][j]['p_id'] 
-                    except KeyError as e:
-                        self.max_id_in_video[self.json_dataset[i]['v_id']] = 0
-            # keys are ordered
-            self.keys_offset = {}
-            self.keys = sorted(self.max_id_in_video.keys())
-            self.offset = [1 if i == 0 else sum([self.max_id_in_video[m] for j,m in enumerate(self.keys) if j<i]) + 1 + i for i,k in enumerate(self.keys)]
-            for i,k in enumerate(self.keys):
-                self.keys_offset[k] = self.offset[i]
-            for i,k in enumerate(self.json_dataset):
-                for j,_ in enumerate(k['p_l']):
-                    self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id'] #+ self.keys_offset[self.json_dataset[i]['v_id']]
-            # self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
-            self.nID = max(self.max_id_in_video.values()) + 1 #* len(self.max_id_in_video.values()) + 1
-        #57398
+        # if cfg.DATASET_TYPE == 'kinetics':
+        #     for i,k in enumerate(self.json_dataset):
+        #         for j,_ in enumerate(k['p_l']):
+        #             self.json_dataset[i]['p_l'][j]['p_id_2'] = self.nID
+        #             self.nID += 1
+        # elif cfg.DATASET_TYPE == 'ava':
+        #     self.max_id_in_video = {}
+        #     for i,k in enumerate(self.json_dataset):
+        #         for j,_ in enumerate(k['p_l']):
+        #             try:
+        #                 if self.json_dataset[i]['p_l'][j]['p_id'] > self.max_id_in_video[self.json_dataset[i]['v_id']]:
+        #                     self.max_id_in_video[self.json_dataset[i]['v_id']] = self.json_dataset[i]['p_l'][j]['p_id'] 
+        #             except KeyError as e:
+        #                 self.max_id_in_video[self.json_dataset[i]['v_id']] = 0
+        #     # keys are ordered
+        #     self.keys_offset = {}
+        #     self.keys = sorted(self.max_id_in_video.keys())
+        #     self.offset = [1 if i == 0 else sum([self.max_id_in_video[m] for j,m in enumerate(self.keys) if j<i]) + 1 + i for i,k in enumerate(self.keys)]
+        #     for i,k in enumerate(self.keys):
+        #         self.keys_offset[k] = self.offset[i]
+        #     for i,k in enumerate(self.json_dataset):
+        #         for j,_ in enumerate(k['p_l']):
+        #             self.json_dataset[i]['p_l'][j]['p_id_2'] = self.json_dataset[i]['p_l'][j]['p_id'] #+ self.keys_offset[self.json_dataset[i]['v_id']]
+        #     # self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
+        #     self.nID = max(self.max_id_in_video.values()) + 1 #* len(self.max_id_in_video.values()) + 1
+        # #57398
         self.annotation = [(video,frame_id) for video in self.json_dataset for frame_id in range(0,61) if not all(p['bb_l'][frame_id]==[0,0,0,0] for p in video['p_l'])] # (video,0),(video,10),..,(video,60) sample each 10 frames
         self.train_list, self.val_list = self.split_dataset(len(self.annotation))
         self.train_ds = self.initilize_ds(self.train_list)

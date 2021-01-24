@@ -1,11 +1,15 @@
 from numba import jit
 from collections import deque
-import torch
-from utils.kalman_filter import KalmanFilter
-from utils.log import logger
-from models import *
+from kalman_filter import KalmanFilter
+#from utils.log import logger
+from models import MSDS
 from tracker import matching
-from .basetrack import BaseTrack, TrackState
+from basetrack import BaseTrack, TrackState
+import numpy as np
+import config as cfg
+from utils import scale_coords, image_preprocess
+import tensorflow as tf
+#import time
 
 
 class STrack(BaseTrack):
@@ -157,21 +161,18 @@ class STrack(BaseTrack):
         return 'OT_{}_({}-{})'.format(self.track_id, self.start_frame, self.end_frame)
 
 
-class JDETracker(object):
-    def __init__(self, opt, frame_rate=30):
-        self.opt = opt
-        self.model = Darknet(opt.cfg, nID=14455)
-        # load_darknet_weights(self.model, opt.weights)
-        self.model.load_state_dict(torch.load(opt.weights, map_location='cpu')['model'], strict=False)
-        self.model.cuda().eval()
-
+class tracker(object):
+    def __init__(self, frame_rate=30):
+        self.model = MSDS()
+        self.model.custom_build()
+        self.model.load(cfg.MSDS_WEIGHTS)
         self.tracked_stracks = []  # type: list[STrack]
         self.lost_stracks = []  # type: list[STrack]
         self.removed_stracks = []  # type: list[STrack]
 
         self.frame_id = 0
-        self.det_thresh = opt.conf_thres
-        self.buffer_size = int(frame_rate / 30.0 * opt.track_buffer)
+        self.det_thresh = cfg.CONF_THRESH
+        self.buffer_size = int(frame_rate / 30.0 * cfg.TRACK_BUFFER)
         self.max_time_lost = self.buffer_size
 
         self.kalman_filter = KalmanFilter()
@@ -203,27 +204,28 @@ class JDETracker(object):
         lost_stracks = []           # The tracks which are not obtained in the current frame but are not removed.(Lost for some time lesser than the threshold for removing)
         removed_stracks = []
 
-        t1 = time.time()
+#        t1 = time.time()
         ''' Step 1: Network forward, get detections & embeddings'''
-        with torch.no_grad():
-            pred = self.model(im_blob)
+        if not (tf.shape(im_blob)[1]==cfg.TRAIN_SIZE and tf.shape(im_blob)[2]==cfg.TRAIN_SIZE):
+            im_blob = image_preprocess(im_blob, cfg.TRAIN_SIZE)
+        rpn_pred, rpn_embeddings, rpn_proposals, mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask = self.model(im_blob)
         # pred is tensor of all the proposals (default number of proposals: 54264). Proposals have information associated with the bounding box and embeddings
-        pred = pred[pred[:, :, 4] > self.opt.conf_thres]
+#        pred = pred[pred[:, :, 4] > self.opt.conf_thres]
         # pred now has lesser number of proposals. Proposals rejected on basis of object confidence score
-        if len(pred) > 0:
-            dets = non_max_suppression(pred.unsqueeze(0), self.opt.conf_thres, self.opt.nms_thres)[0].cpu()
+        if len(rpn_proposals) > 0:
+#            dets = non_max_suppression(pred.unsqueeze(0), self.opt.conf_thres, self.opt.nms_thres)[0].cpu()
             # Final proposals are obtained in dets. Information of bounding box and embeddings also included
             # Next step changes the detection scales
-            scale_coords(self.opt.img_size, dets[:, :4], img0.shape).round()
+#            scale_coords(self.opt.img_size, dets[:, :4], img0.shape).round()
             '''Detections is list of (x1, y1, x2, y2, object_conf, class_score, class_pred)'''
             # class_pred is the embeddings.
 
             detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:4]), tlbrs[4], f.numpy(), 30) for
-                          (tlbrs, f) in zip(dets[:, :5], dets[:, 6:])]
+                          (tlbrs, f) in zip(rpn_proposals[:, :5], rpn_proposals[:, 6:])]
         else:
             detections = []
 
-        t2 = time.time()
+#        t2 = time.time()
         # print('Forward: {} s'.format(t2-t1))
 
         ''' Add newly detected tracklets to tracked_stracks'''

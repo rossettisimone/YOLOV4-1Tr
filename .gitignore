@@ -6,5 +6,7 @@ __pycache__/*
 *.weights
 /logdir
 /__pycache__
-
-
+config.py
+/weights*
+/weights_old
+weights_old/
