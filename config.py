@@ -56,6 +56,7 @@ STRIDES = [ 4, 8, 16, 32] #2
 LEVELS = 4 #5
 EMB_DIM = 208
 CSP_DARKNET53 = './weights/yolov4.weights'
+MSDS_WEIGHTS = './tracker_weights_10.tf'
 # Train
 WD = 1e-4
 LR = 1e-2
@@ -72,3 +73,6 @@ MAX_PROP = 200
 POOL_SIZE = 7
 MASK_POOL_SIZE = 14
 MASK_SIZE = 28
+
+
+TRACK_BUFFER = 30

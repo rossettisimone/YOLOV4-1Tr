@@ -157,7 +157,7 @@ class CustomDecode(tf.keras.layers.Layer):
         return pred, emb
     
     def decode(self, pred, training, inferring):#align
-#        if training and not inferring: # b x 104 x 104 x 4 x 6 - b x 104 x 104 x 64
+#        if training and not inferring: # b x 104 x 104 x 24 -> b x 104 x 104 x 4 x 6
         return tf.transpose(tf.reshape(pred, [tf.shape(pred)[0], cfg.TRAIN_SIZE//cfg.STRIDES[self.LEVEL], cfg.TRAIN_SIZE//cfg.STRIDES[self.LEVEL], cfg.NUM_ANCHORS, cfg.NUM_CLASS + 5]), perm = [0, 3, 1, 2, 4])#, pemb  # prediction        
 #        
 #        if training: #and inferring:
@@ -185,30 +185,33 @@ class ProposalLayer(tf.keras.layers.Layer):
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
         self.TRAIN_SIZE = tf.constant(cfg.TRAIN_SIZE,dtype=tf.float32)
-    def call(self, input_layer, training = False, inferring = False):
+    def call(self, predictions, embeddings, training = False, inferring = False):
+        """ predictions: b x h x w x 4 x 6; embeddings: b x h x w x 208 """
         proposals = []
-        for level, pred in enumerate(input_layer):
+        for level, (pred, pemb) in enumerate(zip(predictions, embeddings)):
             pbox = pred[..., :4]
             pconf = pred[..., 4:6]  # Conf
-            pconf = tf.nn.softmax(pconf, axis=-1)[...,1][...,tf.newaxis] #foreground
+            pconf = tf.nn.softmax(pconf, axis=-1)[...,1][...,tf.newaxis] # 1 is foreground
             pbox = decode_delta_map(pbox, self.ANCHORS[level]/self.STRIDES[level])
             pbox *= self.STRIDES[level] # now in range [0, .... cfg.TRAIN_SIZE]
             pbox /= self.TRAIN_SIZE #now normalized in [0...1]
-            preds = tf.concat([pbox, pconf], axis=-1)
+            pemb = tf.math.l2_normalize(tf.tile(pemb[:,tf.newaxis],(1,cfg.NUM_ANCHORS,1,1,1)), axis=-1, epsilon=1e-12)
+            preds = tf.concat([pbox, pconf, pemb], axis=-1)
             proposal = tf.reshape(preds, [tf.shape(preds)[0], -1, tf.shape(preds)[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
             proposal = get_top_proposals(proposal)
             proposals.append(proposal)
         proposals = tf.concat(proposals,axis=1) #concat along levels
+        boxes = tf.clip_by_value(xywh2xyxy(proposals[...,:4]), clip_value_min=0.0,clip_value_max=1.0)
+        proposals = tf.concat([boxes,proposals[...,4:]],axis=-1) # to bbox
         proposals = nms_proposals(proposals)
-        proposals = tf.clip_by_value(proposals, clip_value_min=0.0,clip_value_max=1.0)
         return proposals
     
-    def get_input_shape(self):
-        return [tf.keras.layers.Input((cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)]
-        
-    def get_output_shape(self):
-        return self.call([tf.zeros((cfg.BATCH, cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)]).shape
-
+#    def get_input_shape(self):
+#        return [tf.keras.layers.Input((cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)]
+#        
+#    def get_output_shape(self):
+#        return self.call([tf.zeros((cfg.BATCH, cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)]).shape
+#
 ############################################################
 #  ROIAlign Layer
 ############################################################

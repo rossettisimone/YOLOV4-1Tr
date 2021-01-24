@@ -22,13 +22,13 @@ if gpus:
 else: 
     print('No GPU found')
     
-from models import tracker
+from models import MSDS
 from loader import DataLoader 
 
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/writer --port 6006
     
 ds = DataLoader()
-model = tracker(data_loader = ds, mask = True)
+model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
@@ -56,6 +56,7 @@ model.fit()
 #import matplotlib.pyplot as plt
 #import numpy as np
 #for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.val_ds.take(2).batch(2):
+#    print(gt_masks)
 #    a=1
 #    plt.imshow(image[0])
 #    plt.show()

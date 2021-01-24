@@ -8,7 +8,7 @@ Created on Tue Dec 22 18:40:02 2020
 
 
 import json
-from PIL import Image
+from PIL import Image, ImageDraw
 import numpy as np
 import config as cfg
 import tensorflow as tf
@@ -158,7 +158,6 @@ def nms_proposals(batch_proposals):
         pred = batch_proposals[i]
         pred = pred[pred[...,4] > cfg.CONF_THRESH] # remove zeros (speed non max suppress)
         if len(pred) > 0: 
-            pred = tf.concat([xywh2xyxy(pred[...,:4]),pred[...,4:]],axis=-1) # to bbox
             indices = tf.image.non_max_suppression(
                                  pred[...,:4], pred[...,4], max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,
                                 score_threshold=cfg.CONF_THRESH
@@ -170,6 +169,18 @@ def nms_proposals(batch_proposals):
     nms_proposals = nms_proposals.stack()
     return nms_proposals
 
+# TODO      
+def draw_bbox(image, bboxs, conf_id=None):
+    img = Image.fromarray(np.array(image.numpy()*255,dtype=np.uint8))                   
+    draw = ImageDraw.Draw(img)   
+    if conf_id == None:
+        conf_id = tf.zeros_like(bboxs)[...,0]
+    for bbox,conf in zip(bboxs.numpy(), conf_id.numpy()):
+        draw.rectangle(bbox, outline ="red") 
+        xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
+        draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"))
+    img.show() 
+    
 def xyxy2xywh(xyxy):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
     # x, y are coordinates of center 
@@ -187,6 +198,19 @@ def xywh2xyxy(xywh):
     x2y2 = xywh[...,:2] + xywh[...,2:4]*0.5
     return tf.concat([x1y1, x2y2], axis=-1)
 
+
+def scale_coords(img_size, coords, img0_shape):
+    # Rescale x1, y1, x2, y2 from 416 to image size
+    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
+    gain_h = float(img_size[1]) / img0_shape[0]
+    gain = min(gain_w, gain_h)
+    pad_x = (img_size[0] - img0_shape[1] * gain) / 2  # width padding
+    pad_y = (img_size[1] - img0_shape[0] * gain) / 2  # height padding
+    coords[:, [0, 2]] -= pad_x
+    coords[:, [1, 3]] -= pad_y
+    coords[:, 0:4] /= gain
+    coords[:, :4] = np.clip(coords[:, :4], min=0)
+    return coords
 
 def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
     assert(tf.shape(anchor_wh)[0]==nA)
@@ -271,6 +295,8 @@ def decode_delta_map(delta_map, anchors):
     '''
     :param: delta_map, shape (nB, nA, nGh, nGw, 4)
     :param: anchors, shape (nA,4)
+    
+    :output: nB, nA, nGh, nGw, (gx, gy, gw, gh)
     '''
     _, nA, nGh, nGw, _ = delta_map.shape
     nB = tf.shape(delta_map)[0] # error in building if None
@@ -282,71 +308,150 @@ def decode_delta_map(delta_map, anchors):
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
 
+def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
+    """ target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
+     target_class_ids: [batch, num_rois]. Integer class IDs.
+     target_masks: [batch, num_rois, height, width].
+        A float32 tensor of values 0 or 1. """
+    gt_bboxes = gt_bboxes[...,:4]
+    gt_bboxes /= cfg.TRAIN_SIZE
+    gt_bboxes = xyxy2xywh(gt_bboxes)
+    nB, nP, _ = proposals.shape
+    proposals = xyxy2xywh(proposals)
+    gt_intersect = tf.TensorArray(tf.float32, size=nB)
+    for i in range(nB):
+        gt_intersect = gt_intersect.write(i,bbox_iou(proposals[i],gt_bboxes[i]))
+    gt_intersect = gt_intersect.stack()
+    gt_indices =  tf.cast(tf.math.argmax(gt_intersect,axis=-1),tf.int32)
+    target_bbox = tf.TensorArray(tf.float32, size=nB)
+    target_masks = tf.TensorArray(tf.float32, size=nB)
+    for i in range(nB):
+        target_bbox = target_bbox.write(i,tf.where(proposals[i]==0.0,0.0, encode_delta(proposals[i], tf.gather(gt_bboxes[i],gt_indices[i],axis=0)))) # zero padded
+        target_masks = target_masks.write(i,tf.where(tf.tile((tf.reduce_sum(proposals[i],axis=-1)==0.0)[...,None,None],(1,28,28)),0.0,tf.gather(gt_masks[i],gt_indices[i],axis=0))) #zero padded
+    target_bbox = target_bbox.stack()
+    target_masks = target_masks.stack()
+    target_class_ids = tf.where(tf.reduce_sum(proposals,axis=-1)>0, 1, 0) # in this dataset if there is bbox, it's human, 1 class
+    return target_class_ids, target_bbox, target_masks
 
-def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
+ 
+def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
+    """Loss for the classifier head of Mask RCNN.
+    target_class_ids: [batch, num_rois]. Integer class IDs. Uses zero
+        padding to fill in the array.
+    pred_class_logits: [batch, num_rois, num_classes]
+    active_class_ids: [batch, num_classes]. Has a value of 1 for
+        classes that are in the dataset of the image, and 0
+        for classes that are not in the dataset.
+        active_class_ids = tf.concat([tf.zeros((nB,1)),tf.ones((nB,1))],axis=-1)
     """
-    scales: 1D array of anchor sizes in pixels. Example: [32, 64, 128]
-    ratios: 1D array of anchor ratios of width/height. Example: [0.5, 1, 2]
-    shape: [height, width] spatial shape of the feature map over which
-            to generate anchors.
-    feature_stride: Stride of the feature map relative to the image in pixels.
-    anchor_stride: Stride of anchors on the feature map. For example, if the
-        value is 2 then generate anchors for every other feature map pixel.
+    # During model building, Keras calls this function with
+    # target_class_ids of type float32. Unclear why. Cast it
+    # to int to get around it.
+    target_class_ids = tf.cast(target_class_ids, 'int32')
+    # Find predictions of classes that are not in the dataset.
+    #pred_class_ids = tf.argmax(pred_class_logits, axis=2)
+    # TODO: Update this line to work with batch > 1. Right now it assumes all
+    #       images in a batch have the same active_class_ids
+    #pred_active = tf.gather(active_class_ids[0], pred_class_ids)
+
+    # # Loss
+    pred_class_logits = tf.math.l2_normalize(pred_class_logits,axis=-1, epsilon=1e-12) #?
+
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
+
+    # Erase losses of predictions of classes that are not in the active
+    # classes of the image.
+#        loss = loss #* pred_active
+
+    # Computer loss mean. Use only predictions that contribute
+    # to the loss to get a correct mean.
+    loss = tf.reduce_sum(loss) #/ tf.reduce_sum(pred_active)
+    return loss
+
+def smooth_l1_loss(y_true, y_pred):
+    """Implements Smooth-L1 loss.
+    y_true and y_pred are typically: [N, 4], but could be any shape.
     """
-    # RPN_ANCHOR_SCALES = ( 8,16 , 32 , 64 , 128 )
-    # RPN_ANCHOR_RATIOS = [0.5, 1, 2]
-    # backbone_shape=[[32 32][16 16][ 8  8][ 4  4][ 2  2]]
-    # BACKBONE_STRIDES = [4, 8, 16, 32, 64]
-    # RPN_ANCHOR_STRIDE = 1
-    # Get all combinations of scales and ratios
-    scales, ratios = np.meshgrid(np.array(scales), np.array(ratios))
-    scales = scales.flatten()
-    ratios = ratios.flatten()
+    diff = tf.keras.backend.abs(y_true - y_pred)
+    less_than_one = tf.keras.backend.cast(tf.keras.backend.less(diff, 1.0), "float32")
+    loss = (less_than_one * 0.5 * diff ** 2) + (1 - less_than_one) * (diff - 0.5)
+    return loss
 
-    # Enumerate heights and widths from scales and ratios
-    heights = scales / np.sqrt(ratios)
-    widths = scales * np.sqrt(ratios)
-
-    # Enumerate shifts in feature space
-    shifts_y = np.arange(0, shape[0], anchor_stride) * feature_stride
-    shifts_x = np.arange(0, shape[1], anchor_stride) * feature_stride
-    shifts_x, shifts_y = np.meshgrid(shifts_x, shifts_y)
-
-    # Enumerate combinations of shifts, widths, and heights
-    box_widths, box_centers_x = np.meshgrid(widths, shifts_x)
-    box_heights, box_centers_y = np.meshgrid(heights, shifts_y)
-
-    # Reshape to get a list of (y, x) and a list of (h, w)
-    box_centers = np.stack(
-        [box_centers_y, box_centers_x], axis=2).reshape([-1, 2])
-    box_sizes = np.stack([box_heights, box_widths], axis=2).reshape([-1, 2])
-    # Convert to corner coordinates (y1, x1, y2, x2)
-    boxes = np.concatenate([box_centers - 0.5 * box_sizes,
-                            box_centers + 0.5 * box_sizes], axis=1)
-
-
-    return boxes
-
-
-def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
-                             anchor_stride):
-    """Generate anchors at different levels of a feature pyramid. Each scale
-    is associated with a level of the pyramid, but each ratio is used in
-    all levels of the pyramid.
-    Returns:
-    anchors: [N, (y1, x1, y2, x2)]. All generated anchors in one array. Sorted
-        with the same order of the given scales. So, anchors of scale[0] come
-        first, then anchors of scale[1], and so on.
+def mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox):
+    """Loss for Mask R-CNN bounding box refinement.
+    target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
+    target_class_ids: [batch, num_rois]. Integer class IDs.
+    pred_bbox: [batch, num_rois, num_classes, (dx, dy, log(dw), log(dh))]
     """
-    # Anchors
-    # [anchor_count, (y1, x1, y2, x2)]
-    # RPN_ANCHOR_SCALES = ( 8,16 , 32 , 64 , 128 )
-    # RPN_ANCHOR_RATIOS = [0.5, 1, 2]
-    # backbone_shape=[[32 32][16 16][ 8  8][ 4  4][ 2  2]]
-    # BACKBONE_STRIDES = [4, 8, 16, 32, 64]
-    # RPN_ANCHOR_STRIDE = 1
-    anchors = []
-    for i in range(len(scales)):
-        anchors.append(generate_anchors(scales[i], ratios, feature_shapes[i],
-                                        feature_strides[i], anchor_stride))
-    return np.concatenate(anchors, axis=0)
+    # Reshape to merge batch and roi dimensions for simplicity.
+    target_class_ids = tf.reshape(target_class_ids, (-1,))
+    target_bbox = tf.reshape(target_bbox, (-1, 4))
+    pred_bbox = tf.reshape(pred_bbox, (-1, tf.shape(pred_bbox)[2], 4))
+
+    # Only positive ROIs contribute to the loss. And only
+    # the right class_id of each ROI. Get their indices.
+    positive_roi_ix = tf.where(target_class_ids > 0)[:, 0]
+    positive_roi_class_ids = tf.cast(
+        tf.gather(target_class_ids, positive_roi_ix), tf.int64)
+    indices = tf.stack([positive_roi_ix, positive_roi_class_ids], axis=1)
+
+    # Gather the deltas (predicted and true) that contribute to loss
+    target_bbox = tf.gather(target_bbox, positive_roi_ix)
+    pred_bbox = tf.gather_nd(pred_bbox, indices)
+    # Smooth-L1 Loss
+    if tf.size(target_bbox) > 0:
+        loss = smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox)
+    else:
+        loss = tf.constant(0.0)
+#        loss = tf.keras.backend.switch(tf.size(target_bbox) > 0,
+#                        self.smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox),
+#                        tf.constant(0.0))
+    loss = tf.reduce_mean(loss)
+    return loss
+
+
+def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
+    """Mask binary cross-entropy loss for the masks head.
+    target_masks: [batch, num_rois, height, width].
+        A float32 tensor of values 0 or 1. Uses zero padding to fill array.
+    target_class_ids: [batch, num_rois]. Integer class IDs. Zero padded.
+    pred_masks: [batch, proposals, height, width, num_classes] float32 tensor
+                with values from 0 to 1.
+    """
+    # Reshape for simplicity. Merge first two dimensions into one.
+    target_class_ids = tf.reshape(target_class_ids, (-1,))
+    mask_shape = tf.shape(target_masks)
+    target_masks = tf.reshape(target_masks, (-1, mask_shape[2], mask_shape[3]))
+    pred_shape = tf.shape(pred_masks)
+    pred_masks = tf.reshape(pred_masks,
+                           (-1, pred_shape[2], pred_shape[3], pred_shape[4]))
+    # Permute predicted masks to [N, num_classes, height, width]
+    pred_masks = tf.transpose(pred_masks, [0, 3, 1, 2])
+
+    # Only positive ROIs contribute to the loss. And only
+    # the class specific mask of each ROI.
+    positive_ix = tf.where(target_class_ids > 0)[:, 0]
+    positive_class_ids = tf.cast(
+        tf.gather(target_class_ids, positive_ix), tf.int64)
+    indices = tf.stack([positive_ix, positive_class_ids], axis=1)
+
+    # Gather the masks (predicted and true) that contribute to loss
+    y_true = tf.gather(target_masks, positive_ix)
+    y_pred = tf.gather_nd(pred_masks, indices)
+
+    # Compute binary cross entropy. If no positive ROIs, then return 0.
+    # shape: [batch, roi, num_classes]
+    if tf.size(y_true) > 0:
+        loss =tf.keras.losses.BinaryCrossentropy()(y_true, y_pred)
+    else:
+        loss = tf.constant(0.0)
+#        loss = tf.keras.backend.switch(tf.size(y_true) > 0,
+#                        tf.keras.backend.binary_crossentropy(target=y_true, output=y_pred),
+#                        tf.constant(0.0))
+    loss = tf.reduce_mean(loss)
+    return loss
+
+    
+def entry_stop_gradients(target, mask):
+    mask_neg = tf.math.logical_not(mask)
+    return tf.stop_gradient(tf.cast(mask,tf.float32) * target) + tf.cast(mask_neg,tf.float32) * target

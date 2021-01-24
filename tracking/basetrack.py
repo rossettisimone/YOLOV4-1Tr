@@ -11,7 +11,7 @@ class TrackState(object):
 
 class BaseTrack(object):
     _count = 0
-
+    
     track_id = 0
     is_activated = False
     state = TrackState.New
