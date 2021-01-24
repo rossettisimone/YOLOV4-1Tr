@@ -2,17 +2,17 @@
 # VIDEOS_DATASET_PATH = "/home/temir/Documents/AVA/Dataset/Kin200/"
 # ANNOTATION_PATH = "/home/temir/Documents/AVA/Dataset/prova.json"
 #import numpy as np
-GPU = '0'
+GPU = '1'
 DATASET_TYPE = 'ava'
 
 # AVA_path 
-VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
-SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"
-ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json" # #ava_frames_boundings_train_v2.2.json
+VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
+SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/masks/"
+ANNOTATION_PATH = "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json" # #ava_frames_boundings_train_v2.2.json
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH= 2
+BATCH= 3
 TRAIN_SIZE = 416#416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20

@@ -21,12 +21,15 @@ if gpus:
 		print(e)
 else: 
     print('No GPU found')
-    
+
+
+
 from models import tracker
 from loader import DataLoader 
 
 # tensorboard --logdir /media/data4/Models/simenv/tracker/logdir --port 6006
-    
+
+
 ds = DataLoader()
 model = tracker(data_loader = ds, mask = True)
 model.custom_build()
