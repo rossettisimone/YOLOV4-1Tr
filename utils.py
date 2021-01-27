@@ -8,15 +8,15 @@ Created on Tue Dec 22 18:40:02 2020
 
 
 import json
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import config as cfg
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 def file_reader(file_name):
     with open(file_name) as json_file:
         return json.load(json_file)
-
 
 def file_writer(file, file_name):
     with open(file_name, 'w') as f:
@@ -63,50 +63,20 @@ def img_tranfrom(img, bbox):
 def read_image(img_path):
     return Image.open(img_path)
 
-def plot_xywh(anchor_list):
-    import matplotlib.pyplot as plt
-    import numpy as np
-    for i in range(0,len(anchor_list)):
-        x,y,w,h = anchor_list[i]
-        x = [x-w/2,x+w/2,x+w/2,x-w/2,x-w/2]
-        y = [y+h/2,y+h/2,y-h/2,y-h/2,y+h/2]
-#        w,h = anchor_list[i:i+2]
-#        x = [-w/2,w/2,w/2,-w/2,-w/2]
-#        y = [-h/2,-h/2,h/2,h/2,-h/2]
-        plt.plot(x,y,'-', color=tuple(np.random.rand(3,1).squeeze()))
-    plt.axis('equal')
-    plt.show()
-    
-def plot_anchor(anchor_list):
-    import matplotlib.pyplot as plt
-    import numpy as np
-    for i in range(0,len(anchor_list)):
-        w,h = anchor_list[i]
-        x=0
-        y=0
-        x = [x-w/2,x+w/2,x+w/2,x-w/2,x-w/2]
-        y = [y+h/2,y+h/2,y-h/2,y-h/2,y+h/2]
-#        w,h = anchor_list[i:i+2]
-#        x = [-w/2,w/2,w/2,-w/2,-w/2]
-#        y = [-h/2,-h/2,h/2,h/2,-h/2]
-        plt.plot(x,y,'-', color=tuple(np.random.rand(3,1).squeeze()))
-    plt.axis('equal')
-    plt.show()
+def scale_coords(img_size, coords, img0_shape):
+    # Rescale x1, y1, x2, y2 from 416 to image size
+    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
+    gain_h = float(img_size[1]) / img0_shape[0]
+    gain = min(gain_w, gain_h)
+    pad_x = (img_size[0] - img0_shape[1] * gain) / 2  # width padding
+    pad_y = (img_size[1] - img0_shape[0] * gain) / 2  # height padding
+    coords[:, [0, 2]] -= pad_x
+    coords[:, [1, 3]] -= pad_y
+    coords[:, 0:4] /= gain
+    coords[:, :4] = np.clip(coords[:, :4], min=0)
+    return coords
 
-def plot_boxes(anchor_list):
-    import matplotlib.pyplot as plt
-    import numpy as np
-    for i in range(0,len(anchor_list)):
-        x1,y1,x2,y2 = anchor_list[i]
-        x = [x1, x1,x2,x2,x1]
-        y = [y1,y2,y2,y1,y1]
-#        w,h = anchor_list[i:i+2]
-#        x = [-w/2,w/2,w/2,-w/2,-w/2]
-#        y = [-h/2,-h/2,h/2,h/2,-h/2]
-        plt.plot(x,y,'-', color=tuple(np.random.rand(3,1).squeeze()))
-    plt.axis('equal')
-    plt.show()
-
+#@tf.function
 def bbox_iou(box1, box2, x1y1x2y2=False):
     """
     Returns the IoU of two bounding boxes
@@ -138,19 +108,21 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
            
+#@tf.function
 def get_top_proposals(batch_proposals):
     nB = tf.shape(batch_proposals)[0]
     top_proposals = tf.TensorArray(tf.float32, size=nB)
     for i in range(nB):
         pred = batch_proposals[i]
         pred = pred[pred[..., 4] > cfg.CONF_THRESH]
-        indices = tf.argsort(pred[..., 4], axis=-1, direction='DESCENDING')[:cfg.MAX_PRED]
+        indices = tf.argsort(pred[..., 4], axis=-1, direction='DESCENDING')[:cfg.MAX_PROP]
         pred = tf.gather(pred,indices)
-        pred = tf.pad(pred,paddings=[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
+        pred = tf.pad(pred,paddings=[[0,cfg.MAX_PROP-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
         top_proposals = top_proposals.write(i,pred)
     top_proposals = top_proposals.stack()
     return top_proposals
 
+#@tf.function
 def nms_proposals(batch_proposals):
     nB = tf.shape(batch_proposals)[0]
     nms_proposals = tf.TensorArray(tf.float32, size=nB)
@@ -163,7 +135,7 @@ def nms_proposals(batch_proposals):
                                 score_threshold=cfg.CONF_THRESH
                             )
             pred = tf.gather(pred, indices) #b x n rois x (4+1+1+208)
-            nms_proposals = nms_proposals.write(i,tf.pad(pred,paddings=[[0,cfg.MAX_PRED-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0))
+            nms_proposals = nms_proposals.write(i,tf.pad(pred,paddings=[[0,cfg.MAX_PROP-tf.shape(pred)[0]],[0,0]], mode='CONSTANT', constant_values=0.0))
         else:
             nms_proposals = nms_proposals.write(i,tf.zeros((cfg.MAX_PROP,tf.shape(pred)[-1]),dtype=tf.float32))
     nms_proposals = nms_proposals.stack()
@@ -179,8 +151,9 @@ def draw_bbox(image, bboxs, conf_id=None):
         draw.rectangle(bbox, outline ="red") 
         xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
         draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"))
-    img.show() 
+    img.show()
     
+#@tf.function
 def xyxy2xywh(xyxy):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
     # x, y are coordinates of center 
@@ -189,7 +162,7 @@ def xyxy2xywh(xyxy):
     wh = (xyxy[...,2:4]-xyxy[...,:2])
     return tf.concat([xy,wh],axis=-1)
 
-
+#@tf.function
 def xywh2xyxy(xywh):
     # Convert bounding box format from [x, y, w, h] to [x1, y1, x2, y2]
     # x, y are coordinates of center 
@@ -198,30 +171,16 @@ def xywh2xyxy(xywh):
     x2y2 = xywh[...,:2] + xywh[...,2:4]*0.5
     return tf.concat([x1y1, x2y2], axis=-1)
 
-
-def scale_coords(img_size, coords, img0_shape):
-    # Rescale x1, y1, x2, y2 from 416 to image size
-    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
-    gain_h = float(img_size[1]) / img0_shape[0]
-    gain = min(gain_w, gain_h)
-    pad_x = (img_size[0] - img0_shape[1] * gain) / 2  # width padding
-    pad_y = (img_size[1] - img0_shape[0] * gain) / 2  # height padding
-    coords[:, [0, 2]] -= pad_x
-    coords[:, [1, 3]] -= pad_y
-    coords[:, 0:4] /= gain
-    coords[:, :4] = np.clip(coords[:, :4], min=0)
-    return coords
-
+#@tf.function
 def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
-    assert(tf.shape(anchor_wh)[0]==nA)
-    target = tf.constant(target, dtype=tf.float32)
+    target = tf.cast(target, tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
     ids = target[:,4]
 
     gt_boxes = xyxy2xywh(bbox)
-    gt_boxes = gt_boxes * tf.constant([nGw, nGh, nGw, nGh], dtype=tf.float32)
+    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
     gt_boxes = tf.clip_by_value(gt_boxes, [0,0,0,0], [nGw, nGh, nGw, nGh])                                        # Shape Ngx4 (xc, yc, w, h)
-    anchor_wh = tf.constant(anchor_wh, dtype=tf.float32)
+    anchor_wh = tf.cast(anchor_wh, tf.float32)
     tbox = tf.zeros((nA, nGh, nGw, 4)) # batch size, anchors, grid size
     tconf = tf.zeros(( nA, nGh, nGw))
     tid = tf.zeros((nA, nGh, nGw, nC))-1
@@ -239,9 +198,9 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
     fg_index = iou_map > cfg.FG_THRESH                                                    
     bg_index = iou_map < cfg.BG_THRESH 
     ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
-    tconf = tf.where(fg_index, 1, tconf)
-    tconf = tf.where(bg_index, 0, tconf)
-    tconf = tf.where(ign_index, -1, tconf)
+    tconf = tf.where(fg_index, 1.0, tconf)
+    tconf = tf.where(bg_index, 0.0, tconf)
+    tconf = tf.where(ign_index, -1.0, tconf)
 
     gt_index = tf.boolean_mask(gt_index_map,fg_index)
     gt_box_list = tf.gather(gt_boxes,gt_index)
@@ -249,18 +208,19 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
 
     if tf.reduce_sum(tf.cast(fg_index,tf.float32)) > 0:
         tid = tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC))
-        tid = tf.where(tf.equal(tid,0),  -1, tid)
+        tid = tf.where(tf.equal(tid,0.0),  -1.0, tid)
         fg_anchor_list = tf.reshape(anchor_list,(nA, nGh, nGw, 4))[fg_index] 
         delta_target = encode_delta(gt_box_list, fg_anchor_list)
         tbox = tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4))
 #    tconf = tf.transpose(tconf,(0,2,1))
 #    tbox = tf.transpose(tbox,(0,2,1,3))
 #    tid = tf.transpose(tid,(0,2,1,3))
-    tconf, tbox, tid = tf.cast(tconf,tf.float32), tf.cast(tbox,tf.float32), tf.cast(tid,tf.float32)
+#    tconf, tbox, tid = tf.cast(tconf,tf.float32), tf.cast(tbox,tf.float32), tf.cast(tid,tf.float32)
     label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
 #    label = tf.transpose(label,(0,2,1,3))
     return label
 
+#@tf.function
 def generate_anchor(nGh, nGw, anchor_wh):
     nA = tf.shape(anchor_wh)[0]
     yy, xx =tf.meshgrid(tf.range(nGh), tf.range(nGw))
@@ -270,6 +230,7 @@ def generate_anchor(nGh, nGw, anchor_wh):
     anchor_mesh = tf.concat([mesh, anchor_offset_mesh], axis=1)                       # Shape nA x 4 x nGh x nGw
     return anchor_mesh
 
+#@tf.function
 def encode_delta(gt_box_list, fg_anchor_list):
     px, py, pw, ph = fg_anchor_list[:, 0], fg_anchor_list[:,1], \
                      fg_anchor_list[:, 2], fg_anchor_list[:,3]
@@ -281,6 +242,7 @@ def encode_delta(gt_box_list, fg_anchor_list):
     dh = tf.math.log(gh/ph)
     return tf.stack([dx, dy, dw, dh], axis=1)
 
+#@tf.function
 def decode_delta(delta, fg_anchor_list):
     px, py, pw, ph = fg_anchor_list[:, 0], fg_anchor_list[:,1], \
                      fg_anchor_list[:, 2], fg_anchor_list[:,3]
@@ -291,6 +253,7 @@ def decode_delta(delta, fg_anchor_list):
     gh = ph * tf.math.exp(dh)
     return tf.stack([gx, gy, gw, gh], axis=1)
 
+#@tf.function
 def decode_delta_map(delta_map, anchors):
     '''
     :param: delta_map, shape (nB, nA, nGh, nGw, 4)
@@ -308,6 +271,7 @@ def decode_delta_map(delta_map, anchors):
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
 
+@tf.function
 def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     """ target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
      target_class_ids: [batch, num_rois]. Integer class IDs.
@@ -316,7 +280,7 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     gt_bboxes = gt_bboxes[...,:4]
     gt_bboxes /= cfg.TRAIN_SIZE
     gt_bboxes = xyxy2xywh(gt_bboxes)
-    nB, nP, _ = proposals.shape
+    nB = tf.shape(proposals)[0]
     proposals = xyxy2xywh(proposals)
     gt_intersect = tf.TensorArray(tf.float32, size=nB)
     for i in range(nB):
@@ -333,7 +297,7 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     target_class_ids = tf.where(tf.reduce_sum(proposals,axis=-1)>0, 1, 0) # in this dataset if there is bbox, it's human, 1 class
     return target_class_ids, target_bbox, target_masks
 
- 
+@tf.function
 def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
     """Loss for the classifier head of Mask RCNN.
     target_class_ids: [batch, num_rois]. Integer class IDs. Uses zero
@@ -356,18 +320,22 @@ def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
 
     # # Loss
     pred_class_logits = tf.math.l2_normalize(pred_class_logits,axis=-1, epsilon=1e-12) #?
-
-    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
-
+    
+    if tf.reduce_sum(target_class_ids)>0:
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
+    else:
+        loss = tf.constant(0.0)
     # Erase losses of predictions of classes that are not in the active
     # classes of the image.
 #        loss = loss #* pred_active
 
     # Computer loss mean. Use only predictions that contribute
     # to the loss to get a correct mean.
-    loss = tf.reduce_sum(loss) #/ tf.reduce_sum(pred_active)
+#    loss = tf.reduce_sum(loss) / tf.reduce_sum(pred_active)
+    loss = tf.reduce_mean(loss) #/ tf.reduce_sum(pred_active)
     return loss
 
+@tf.function
 def smooth_l1_loss(y_true, y_pred):
     """Implements Smooth-L1 loss.
     y_true and y_pred are typically: [N, 4], but could be any shape.
@@ -377,6 +345,7 @@ def smooth_l1_loss(y_true, y_pred):
     loss = (less_than_one * 0.5 * diff ** 2) + (1 - less_than_one) * (diff - 0.5)
     return loss
 
+@tf.function
 def mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox):
     """Loss for Mask R-CNN bounding box refinement.
     target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
@@ -409,7 +378,7 @@ def mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox):
     loss = tf.reduce_mean(loss)
     return loss
 
-
+@tf.function
 def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     """Mask binary cross-entropy loss for the masks head.
     target_masks: [batch, num_rois, height, width].
@@ -451,7 +420,7 @@ def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     loss = tf.reduce_mean(loss)
     return loss
 
-    
+@tf.function
 def entry_stop_gradients(target, mask):
     mask_neg = tf.math.logical_not(mask)
     return tf.stop_gradient(tf.cast(mask,tf.float32) * target) + tf.cast(mask_neg,tf.float32) * target

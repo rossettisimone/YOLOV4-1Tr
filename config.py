@@ -12,7 +12,7 @@ ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/datase
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH= 2
+BATCH = 8
 TRAIN_SIZE = 416#416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
@@ -25,9 +25,10 @@ BG_THRESH = 0.3
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20 #150
-ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117,  27,  82,  57, 165, 102,
-       209, 181, 235,  41, 124,  86, 248, 154, 313, 272, 353,  55, 165,
-       114, 331, 205, 418, 363, 470]
+ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
+           27,  82,  57, 165, 102, 209, 181, 235,
+           41, 124,  86, 248, 154, 313, 272, 353,
+           55, 165, 114, 331, 205, 418, 363, 470]
 #[ 13,  41,  28,  82,  51, 104,  90, 117,  27,  82,  57, 165, 102,
 #       209, 181, 235,  41, 124,  86, 248, 154, 313, 272, 353,  55, 165,
 #       114, 331, 205, 418, 363, 470]
@@ -64,11 +65,10 @@ MOM = 0.9
 EPOCHS = 30
 
 CONF_THRESH = 0.5
-NMS_THRESH = 0.5
+NMS_THRESH = 0.3
 STEPS_PER_EPOCH = 1000
 
-MAX_PRED = 200
-MAX_PROP = 200
+MAX_PROP = 20
 
 POOL_SIZE = 7
 MASK_POOL_SIZE = 14

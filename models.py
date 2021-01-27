@@ -87,7 +87,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             self.step_val = 0
             self.batch = cfg.BATCH
             self.steps_per_epoch = cfg.STEPS_PER_EPOCH
-            self.step_trains = self.epochs * self.steps_per_epoch * self.batch
+            self.step_trains = self.epochs * self.steps_per_epoch
         self.freeze_bkbn = freeze_bkbn
         self.freeze_bn = freeze_bn
         self.LEVELS = cfg.LEVELS
@@ -109,35 +109,34 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.neck = fpn()
         #YOLO LIKE
         self.head = rpn() 
-        
-        self.proposal = ProposalLayer() #proposal + embedding
-                
-        self.s_c = tf.Variable(initial_value=[0.0], trainable=True) #-4.15
-        self.s_r = tf.Variable(initial_value=[0.0], trainable=True) # -4.85
+            
+        self.s_c = tf.Variable(initial_value=0.0, trainable=True) #-4.15
+        self.s_r = tf.Variable(initial_value=0.0, trainable=True) # -4.85
         
         if self.emb:
-            self.s_id = tf.Variable(initial_value=[0.0], trainable=True) # -2.3
+            self.s_id = tf.Variable(initial_value=0.0, trainable=True) # -2.3
             self.classifier = tf.keras.layers.Dense(self.nID) if self.nID>0 else None
             self.classifier.build((tf.newaxis,self.emb_dim))
             
         if self.mask:
+            self.proposal = ProposalLayer() #proposal + embedding
             self.fpn_classifier = fpn_classifier_AFP()            
             self.fpn_mask = fpn_mask_AFP()
-            self.s_mc = tf.Variable(initial_value=[0.0], trainable=True) 
-            self.s_mr = tf.Variable(initial_value=[0.0], trainable=True)
-            self.s_mm = tf.Variable(initial_value=[0.0], trainable=True)
-            
+            self.s_mc = tf.Variable(initial_value=0.0, trainable=True) 
+            self.s_mr = tf.Variable(initial_value=0.0, trainable=True)
+            self.s_mm = tf.Variable(initial_value=0.0, trainable=True)
+    
     def call(self, input_layers, training=False, inferring=False):
         features = self.bkbn(input_layers, training)
         pyramid = self.neck(features, training)
         rpn_pred, rpn_embeddings = self.head(pyramid, training, inferring) # (proposal, embedding),...(proposal_embedding) for each piramid level
-        rpn_proposals = self.proposal(rpn_pred, rpn_embeddings, training, inferring) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
         if self.mask:
+            rpn_proposals = self.proposal(rpn_pred, rpn_embeddings, training, inferring) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox = self.fpn_classifier([rpn_proposals[...,:4],rpn_embeddings])
             mrcnn_mask = self.fpn_mask([rpn_proposals[...,:4],rpn_embeddings])
             return rpn_pred, rpn_embeddings, rpn_proposals, mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask
         else:
-            return rpn_pred, rpn_embeddings, rpn_proposals
+            return rpn_pred, rpn_embeddings
     
     def get_input_shape(self):
         return tf.zeros((cfg.BATCH,cfg.TRAIN_SIZE,cfg.TRAIN_SIZE, 3))
@@ -145,8 +144,8 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
     def get_output_shape(self):
         return [out.shape for out in self.call(self.get_input_shape())]
     
+    @tf.function
     def train_step(self, data):
-        self.step_train += 1
         training = True
         inferring = False
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
@@ -155,29 +154,27 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             if self.mask:
                 preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
                 target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-                self.mean_total_loss = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+                alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
             else:
-                preds, embs, proposals = self(image, training=training, inferring=inferring)
-                self.mean_total_loss = self.compute_loss_rpn(labels, preds, embs, training)
+                preds, embs = self(image, training=training, inferring=inferring)
+                alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
             
-            gradients = tape.gradient(self.mean_total_loss, self.trainable_variables)
+            gradients = tape.gradient(alb_total_loss, self.trainable_variables)
             self.optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, self.trainable_variables) if grad is not None)
-            self.loss_summary(training)
-        res = "=> STEP %4d/%4d   lr: %.6f  mean_total_loss: %4.2f  mean_box_loss: %4.2f   mean_conf_loss: %4.2f  " % (self.step_train, self.step_trains, self.optimizer.lr.numpy(), self.mean_total_loss, self.mean_box_loss, self.mean_conf_loss)
-        if self.emb:
-            res += "mean_id_loss: %4.2f  "%(self.mean_id_loss)
-        if self.mask:
-           res += "mrcnn_class_loss: %4.2f  mrcnn_box_loss: %4.2f   mrcnn_mask_loss: %4.2f" % (self.mrcnn_class_loss, self.mrcnn_box_loss, self.mrcnn_mask_loss)
-        tf.print(res)
-                        
-    def compute_loss(self, labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
-        # rpn loss        
-        loss = self.compute_loss_rpn(labels, preds, embs, training)
-        # mrcnn loss
-        loss += self.compute_loss_mrcnn(target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks)
-        loss *= 0.5
-        return loss
+        return [alb_total_loss] + loss_list
     
+    @tf.function                    
+    def compute_loss(self, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
+        # rpn loss 
+        alb_total_loss, *rpn_loss_list = self.compute_loss_rpn(labels, preds, embs, training)
+        # mrcnn loss
+        alb_loss, *mrcnn_loss_list = self.compute_loss_mrcnn(proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks)
+        alb_total_loss += alb_loss
+        alb_total_loss *= 0.5
+
+        return [alb_total_loss] + rpn_loss_list + mrcnn_loss_list
+
+    @tf.function
     def compute_loss_rpn(self, labels, preds, embs, training):
         if self.emb:
             mean_box_loss = []
@@ -188,9 +185,10 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 mean_box_loss.append(lbox)
                 mean_conf_loss.append(lconf)
                 mean_id_loss.append(lid) 
-            self.mean_box_loss, self.mean_conf_loss, self.mean_id_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0), tf.reduce_mean(mean_id_loss,axis=0) 
-            loss = tf.math.exp(-self.s_r)*self.mean_box_loss + tf.math.exp(-self.s_c)*self.mean_conf_loss \
-                        + tf.math.exp(-self.s_id)*self.mean_id_loss + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing        
+            mean_box_loss, mean_conf_loss, mean_id_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0), tf.reduce_mean(mean_id_loss,axis=0) 
+            alb_loss = tf.math.exp(-self.s_r)*mean_box_loss + tf.math.exp(-self.s_c)*mean_conf_loss \
+                        + tf.math.exp(-self.s_id)*mean_id_loss + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing        
+            return alb_loss, mean_box_loss, mean_conf_loss, mean_id_loss
         else:
             mean_box_loss = []
             mean_conf_loss = []
@@ -198,19 +196,22 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 lbox, lconf = self.compute_loss_rpn_level(label, pred, emb, training)
                 mean_box_loss.append(lbox)
                 mean_conf_loss.append(lconf)
-            self.mean_box_loss, self.mean_conf_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0)
-            loss = tf.math.exp(-self.s_r)*self.mean_box_loss + tf.math.exp(-self.s_c)*self.mean_conf_loss \
+            mean_box_loss, mean_conf_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0)
+            alb_loss = tf.math.exp(-self.s_r)*mean_box_loss + tf.math.exp(-self.s_c)*mean_conf_loss \
                         + (self.s_r + self.s_c) #Automatic Loss Balancing        
-        return loss
+            return alb_loss, mean_box_loss, mean_conf_loss
 
-#    @tf.function
+    @tf.function
     def compute_loss_rpn_level(self, label, pred, emb, training):
         pbox = pred[..., :4]
         pconf = pred[..., 4:6]
         tbox = label[...,:4]
         tconf = label[...,4]
         mask = tconf>0
-        lbox = self.SmoothL1Loss(tbox[mask],pbox[mask])
+        if tf.reduce_sum(tf.cast(mask,tf.float32))>0:
+            lbox = self.SmoothL1Loss(tf.boolean_mask(tbox,mask),tf.boolean_mask(pbox,mask))
+        else:
+            lbox = tf.constant(0.0)
         pconf = entry_stop_gradients(pconf, tconf[...,tf.newaxis]<0) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
         tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf), tf.int32)
         lconf =  self.CrossEntropyLossLogits(tconf,pconf) # apply softmax and do non negative log likelihood loss 
@@ -219,47 +220,48 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             emb_mask = tf.cast(tf.math.reduce_max(tf.cast(mask, tf.float32), axis=1), tf.bool)
             tids = tf.math.reduce_max(tids, axis=1)
             tids = tids[emb_mask]
-            embedding = emb[emb_mask]
+            embedding = tf.boolean_mask(emb,emb_mask)
             embedding = self.emb_scale * tf.math.l2_normalize(embedding,axis=1, epsilon=1e-12)
-            logits = self.classifier(embedding) 
-            logits = entry_stop_gradients(logits,tids<0)
-            tids = tf.cast(tf.where(tf.less(tids, 0.0), 0.0, tids),tf.int32) # stop gradient for regions labeled -1
-            lid = self.CrossEntropyLossLogits(tf.squeeze(tids),logits)
+            if tf.shape(tids)[0]>0:
+                logits = self.classifier(embedding) 
+                logits = entry_stop_gradients(logits,tids<0)
+                tids = tf.cast(tf.where(tf.less(tids, 0.0), 0.0, tids),tf.int32) # stop gradient for regions labeled -1
+                lid = self.CrossEntropyLossLogits(tf.squeeze(tids,axis=-1),logits)
+            else:
+                lid = tf.constant(0.0)
             self.classifier_summary(embedding, training)
             return lbox, lconf, lid
         else:
             return lbox, lconf
 
-#    @tf.function
-    def compute_loss_mrcnn(self, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks):
+    @tf.function
+    def compute_loss_mrcnn(self, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks):
         # prepare the ground truth
-        self.mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
-        self.mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
-        self.mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
-        loss = tf.math.exp(-self.s_mc)*self.mrcnn_class_loss + tf.math.exp(-self.s_mr)*self.mrcnn_box_loss \
-                + tf.math.exp(-self.s_mm)*self.mrcnn_mask_loss + (self.s_mr + self.s_mc + self.s_mm) #Automatic Loss Balancing        
-        
-        return loss
+        mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
+        mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
+        mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
+        if tf.reduce_sum(proposals)>0:
+            alb_loss = tf.math.exp(-self.s_mc)*mrcnn_class_loss + tf.math.exp(-self.s_mr)*mrcnn_box_loss \
+                    + tf.math.exp(-self.s_mm)*mrcnn_mask_loss + (self.s_mr + self.s_mc + self.s_mm) #Automatic Loss Balancing        
+        else:
+            alb_loss = tf.constant(0.0)
+        return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss
    
+    @tf.function
     def test_step(self, data):
-        self.step_val += 1
         training = False
         inferring = False
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
         labels = [label_2, labe_3, label_4, label_5]
         if self.mask:
             preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
-            target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-            self.mean_total_loss = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+            target_class_ids, target_bbox, target_masks = +(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+            alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
         else:
-            preds, embs, proposals = self(image, training=training, inferring=inferring)
-            self.mean_total_loss = self.compute_loss_rpn(labels, preds, embs, training)
-        res = "=> STEP %4d  mean_total_loss: %4.2f  mean_box_loss: %4.2f   mean_conf_loss: %4.2f " % (self.step_val, self.mean_total_loss, self.mean_box_loss, self.mean_conf_loss)
-        if self.emb:
-            res += "mean_id_loss: %4.2f  "%(self.mean_id_loss)
-        if self.mask:
-           res += "mrcnn_class_loss: %4.2f  mrcnn_box_loss: %4.2f   mrcnn_mask_loss: %4.2f" % (self.mrcnn_class_loss, self.mrcnn_box_loss, self.mrcnn_mask_loss)
-        tf.print(res)
+            preds, embs = self(image, training=training, inferring=inferring)
+            alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
+            
+        return [alb_total_loss] + loss_list
         
     def fit(self, epochs = None, start_epoch = 0):
         assert self.ds is not None, 'please pass a DataLoader'
@@ -276,62 +278,91 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.freeze_batch_normalization() 
             self.adapt_lr()
             for data in self.train_ds.take(self.steps_per_epoch*self.batch).batch(self.batch):
-                self.train_step(data)
-            path = "./weights/%s_%s_%s_%d_%4.2f_%s.tf"%(self.name,'emb_' if self.emb else 'noemb_','mask_' if self.mask else 'nomask_',self.epoch,self.mean_total_loss,datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+                self.step_train += 1
+                losses = self.train_step(data)
+                self.loss_summary(losses, training=True)
+                self.print_loss(losses, training=True)
+            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, losses[0],datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
             gc.collect()
-            for data in self.val_ds.take(10*self.batch).batch(self.batch):
-                self.test_step(data)               
+            for data in self.val_ds.take(100*self.batch).batch(self.batch):
+                self.step_val += 1
+                losses = self.test_step(data) 
+                self.loss_summary(losses, training=False)
+                self.print_loss(losses, training=False)
             gc.collect()
     
-    # TODO
+    @tf.function
     def infer(self, image):
         training = True
         inferring = True
-        preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training, inferring=inferring)
-#        proposals = nms_proposals(proposals)
-        if len(proposals)==0:
-            tf.print('None')
-        for i,proposal in enumerate(proposals):
-            if len(proposal)>0:
-                bboxs = proposal[...,:4]
-#                confs = proposal[...,4] 
-#                embs = proposal[...,5:] # needed for tracking
+        if self.mask:
+            preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training, inferring=inferring)
+        else:
+            preds, embs = self(image, training=training, inferring=inferring)
+            proposals = ProposalLayer()(preds, embs, training, inferring)
+        
+        nB = tf.shape(image)[0]
+        for i in range(nB):
+            proposal = proposals[i]
+            if tf.reduce_sum(proposal)>0:
+                valid = tf.reduce_sum(tf.cast(tf.reduce_sum(proposals, axis=-1)>0,tf.int32))
+                proposal = proposal[:valid,:]           
+                bboxs = proposal[...,:4]*cfg.TRAIN_SIZE
+                confs = proposal[...,4] 
+                tf.print('Found')
                 # Final proposals are obtained in dets. Information of bounding box and embeddings also included
-                draw_bbox(image[i], bboxs)
-    #            detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:4]), tlbrs[4], f.numpy(), 30) for
-    #                          (tlbrs, f) in zip(dets[:, :5], dets[:, 6:])]
+                # draw_bbox(image[i], bboxs, confs)
             else:
-    #            detections = []
                 tf.print('None')
     
-#        plt.imshow(np.array(img))
-#        plt.show()
-    
-    def loss_summary(self, training):
+    def print_loss(self, losses, training=True):
+        if training:
+            res = "=> STEP {}/{}  lr: {:0.5f}  auto_loss_bal: "\
+                "{:0.5f}  mean_box_loss: {:0.5f}  mean_conf_loss: {:0.5f}  "\
+                "".format(self.step_train, self.step_trains, self.optimizer.lr.numpy(), 
+                          losses[0], losses[1], losses[2])
+            if self.emb:
+                res += "mean_id_loss: {:0.5f}  ".format(losses[3])
+            if self.mask:
+               res += "mrcnn_class_loss: {:0.5f}  mrcnn_box_loss: {:0.5f}"\
+               "  mrcnn_mask_loss: {:0.5f}".format(losses[-3], losses[-2], losses[-1])
+            tf.print(res)
+        else:
+            res = "=> STEP {}  auto_loss_bal: {:0.5f}  mean_box_loss: "\
+                "{:0.5f}   mean_conf_loss: {:0.5f} ".format(self.step_val, losses[0], 
+                 losses[1], losses[2])
+            if self.emb:
+                res += "mean_id_loss: {:0.5f}  ".format(losses[3])
+            if self.mask:
+                res += "mrcnn_class_loss: {:0.5f}  mrcnn_box_loss: "\
+                    "{:0.5f}   mrcnn_mask_loss: {:0.5f}".format(losses[-3], losses[-2], losses[-1])
+            tf.print(res)
+
+    def loss_summary(self, losses, training=True):
         with self.writer.as_default():
             scope = 'train' if training else 'val'
             step = self.step_train if training else self.step_val
             with tf.name_scope(scope):
                 with tf.name_scope('loss'):
-                    tf.summary.scalar("mean_total_loss", tf.squeeze(self.mean_total_loss), step=step)
+                    tf.summary.scalar("auto_loss_bal", tf.squeeze(losses[0]), step=step)
                     tf.summary.scalar("lr", self.optimizer.lr, step=self.step_train)
                     with tf.name_scope('rpn'):
                         tf.summary.scalar("s_c", tf.squeeze(self.s_c), step=step)
                         tf.summary.scalar("s_r", tf.squeeze(self.s_r), step=step)
-                        tf.summary.scalar("mean_box_loss", tf.squeeze(self.mean_box_loss), step=step)
-                        tf.summary.scalar("mean_conf_loss", tf.squeeze(self.mean_conf_loss), step=step)
+                        tf.summary.scalar("mean_box_loss", tf.squeeze(losses[1]), step=step)
+                        tf.summary.scalar("mean_conf_loss", tf.squeeze(losses[2]), step=step)
                         if self.emb:
-                            tf.summary.scalar("mean_id_loss", tf.squeeze(self.mean_id_loss), step=step)
                             tf.summary.scalar("s_id", tf.squeeze(self.s_id), step=step)
-                    if self.mask:
-                        with tf.name_scope('mrcnn'): 
+                            tf.summary.scalar("mean_id_loss", tf.squeeze(losses[3]), step=step)
+                    with tf.name_scope('mrcnn'): 
+                        if self.mask:
                             tf.summary.scalar("s_mc", tf.squeeze(self.s_mc), step=step)
                             tf.summary.scalar("s_mr", tf.squeeze(self.s_mr), step=step)
                             tf.summary.scalar("s_mm", tf.squeeze(self.s_mm), step=step)
-                            tf.summary.scalar("mrcnn_box_loss", tf.squeeze(self.mrcnn_box_loss), step=step)
-                            tf.summary.scalar("mrcnn_class_loss", tf.squeeze(self.mrcnn_class_loss), step=step)
-                            tf.summary.scalar("mrcnn_mask_loss", tf.squeeze(self.mrcnn_mask_loss), step=step)
+                            tf.summary.scalar("mrcnn_class_loss", tf.squeeze(losses[-3]), step=step)
+                            tf.summary.scalar("mrcnn_box_loss", tf.squeeze(losses[-2]), step=step)
+                            tf.summary.scalar("mrcnn_mask_loss", tf.squeeze(losses[-1]), step=step)
         self.writer.flush()
         
     def classifier_summary(self, input_tensor, training):

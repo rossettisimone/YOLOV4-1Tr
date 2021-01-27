@@ -190,7 +190,8 @@ class Generator(object):
         return image, masks, bboxes
     
 class DataLoader(Generator):
-    def __init__(self):
+    def __init__(self, shuffle=True, data_aug=True):
+        self.shuffle=shuffle
         self.json_dataset = file_reader(cfg.ANNOTATION_PATH)
         self.nID = 1
         self.flow=True
@@ -220,24 +221,24 @@ class DataLoader(Generator):
             self.nID = sum(self.max_id_in_video.values()) + 1 * len(self.max_id_in_video.values()) + 1
         #57398
         self.annotation = [(video,frame_id) for video in self.json_dataset for frame_id in range(0,61) if not all(p['bb_l'][frame_id]==[0,0,0,0] for p in video['p_l'])] # (video,0),(video,10),..,(video,60) sample each 10 frames
-        self.train_list, self.val_list = DataLoader.split_dataset(len(self.annotation))
+        self.train_list, self.val_list = self.split_dataset(len(self.annotation))
         self.train_ds = self.initilize_ds(self.train_list)
         self.val_ds = self.initilize_ds(self.val_list)
-        self.data_aug = cfg.DATA_AUGMENTATION
+        self.data_aug = data_aug
         self.num_classes = cfg.NUM_CLASS
         self.anchors = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
 #        self.anchor_per_scale = cfg.ANCHOR_PER_SCALE
         self.train_input_size = cfg.TRAIN_SIZE
-        self.strides = np.array(cfg.STRIDES)
+        self.strides = tf.cast(cfg.STRIDES,tf.float32)
         self.train_output_sizes = self.train_input_size // self.strides
         self.max_bbox_per_scale = cfg.MAX_BBOX_PER_SCALE
         tf.print('Dataset loaded.')
         tf.print('# identities:',self.nID)
             
-    @classmethod
-    def split_dataset(cls, ds_size):
+    def split_dataset(self, ds_size):
         total_list = np.arange(ds_size)
-        np.random.shuffle(total_list)
+        if self.shuffle:
+            np.random.shuffle(total_list)
         divider =round(ds_size*cfg.SPLIT_RATIO)
         return total_list[:divider], total_list[divider:]
 
