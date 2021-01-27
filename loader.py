@@ -190,7 +190,8 @@ class Generator(object):
         return image, masks, bboxes
     
 class DataLoader(Generator):
-    def __init__(self, shuffle=True):
+    def __init__(self, shuffle=True, data_aug=True):
+        self.shuffle=shuffle
         self.json_dataset = file_reader(cfg.ANNOTATION_PATH)
         self.nID = 1
         self.shuffle=shuffle
@@ -225,12 +226,12 @@ class DataLoader(Generator):
         self.train_list, self.val_list = self.split_dataset(len(self.annotation))
         self.train_ds = self.initilize_ds(self.train_list)
         self.val_ds = self.initilize_ds(self.val_list)
-        self.data_aug = cfg.DATA_AUGMENTATION
+        self.data_aug = data_aug
         self.num_classes = cfg.NUM_CLASS
         self.anchors = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
 #        self.anchor_per_scale = cfg.ANCHOR_PER_SCALE
         self.train_input_size = cfg.TRAIN_SIZE
-        self.strides = np.array(cfg.STRIDES)
+        self.strides = tf.cast(cfg.STRIDES,tf.float32)
         self.train_output_sizes = self.train_input_size // self.strides
         self.max_bbox_per_scale = cfg.MAX_BBOX_PER_SCALE
         tf.print('Dataset loaded.')

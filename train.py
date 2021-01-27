@@ -22,23 +22,27 @@ if gpus:
 else: 
     print('No GPU found')
 
+#mirrored_strategy = tf.distribute.MirroredStrategy(devices=[device.name for device in logical_devices])
+#print ('Number of devices: {}'.format(mirrored_strategy.num_replicas_in_sync))
 
 from models import MSDS
 
 from loader import DataLoader 
 
-# tensorboard --logdir /media/data4/Models/simenv/tracker/logdir --port 6006
+# tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/logdir --port 6006
+# fiorapirri@fiorapirri-GL502VSK:~$ scp alcor@Alcor:/media/data4/Models/simenv/tracker/weights/checkpoint /home/fiorapirri/Documents/workspace/tracker4/weights/checkpoint
 
-
-ds = DataLoader(shuffle = True)
-model = MSDS(data_loader = ds, emb = False, mask = False)
+ds = DataLoader(shuffle=True, data_aug=True)
+#with mirrored_strategy.scope():
+model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 
 #model.neck.summary()
 #model.head.summary()
-#model.summary()
-#model.load('./tracker_weights_10.tf')
+model.summary()
+#model.load('./weights/MSDS_noemb_nomask_20_-5.56_2021-01-26-11-09-44.tf')
+#model.trainable = False # too fucking important for inferring
 model.fit()
 
 #import time
@@ -58,17 +62,45 @@ model.fit()
 #    return count
 #import matplotlib.pyplot as plt
 #import numpy as np
-#for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.val_ds.take(2).batch(2):
+
+
+
+
+#import time
+#import contextlib
+#@contextlib.contextmanager
+#def options(options):
+#  old_opts = tf.config.optimizer.get_experimental_options()
+#  tf.config.optimizer.set_experimental_options(options)
+#  try:
+#    yield
+#  finally:
+#    tf.config.optimizer.set_experimental_options(old_opts)
+#
+#fps = 0
+#i=0
+#with options({'constant_folding': True}):
+#    for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.train_ds.take(300).batch(1):
+#        t0=time.time()
+#        model.infer(image)
+#        i+=1
+#        fps+=1/(time.time()-t0)
+#        print(fps/i)
+
+
+
+
+
 #    print(gt_masks)
 #    a=1
 #    plt.imshow(image[0])
 #    plt.show()
 #    for i,m in enumerate(masks[0]):
-#        if not np.all(m==0):
+#        if not np.all(m==0):for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.val_ds.take(100).batch(1):
+#    model.infer(image)
 #            print(bboxes[0,i])
 #            plt.imshow(m)
 #            plt.show()
-    
 #    model.draw_bbox(image[0], bboxes[0][...,:4], bboxes[0][...,4:])
 #    training = True
 #    inferring = True
@@ -78,7 +110,6 @@ model.fit()
 #            print(bboxes[0,i])
 #            plt.imshow(m)
 #            plt.show()
-#    model.infer(image)
 ##    plt.imshow(image[0])
 ##    plt.show()
 #    labels = [label_2, label_3, label_4, label_5]
