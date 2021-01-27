@@ -177,29 +177,29 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
     @tf.function
     def compute_loss_rpn(self, labels, preds, embs, training):
         if self.emb:
-            mean_box_loss = []
-            mean_conf_loss = []
-            mean_id_loss = []
+            rpn_box_loss = []
+            rpn_class_loss = []
+            rpn_id_loss = []
             for label, pred, emb in zip(labels, preds, embs):
                 lbox, lconf, lid = self.compute_loss_rpn_level(label, pred, emb, training)
-                mean_box_loss.append(lbox)
-                mean_conf_loss.append(lconf)
-                mean_id_loss.append(lid) 
-            mean_box_loss, mean_conf_loss, mean_id_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0), tf.reduce_mean(mean_id_loss,axis=0) 
-            alb_loss = tf.math.exp(-self.s_r)*mean_box_loss + tf.math.exp(-self.s_c)*mean_conf_loss \
-                        + tf.math.exp(-self.s_id)*mean_id_loss + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing        
-            return alb_loss, mean_box_loss, mean_conf_loss, mean_id_loss
+                rpn_box_loss.append(lbox)
+                rpn_class_loss.append(lconf)
+                rpn_id_loss.append(lid) 
+            rpn_box_loss, rpn_class_loss, rpn_id_loss = tf.reduce_mean(rpn_box_loss,axis=0), tf.reduce_mean(rpn_class_loss,axis=0), tf.reduce_mean(rpn_id_loss,axis=0) 
+            alb_loss = tf.math.exp(-self.s_r)*rpn_box_loss + tf.math.exp(-self.s_c)*rpn_class_loss \
+                        + tf.math.exp(-self.s_id)*rpn_id_loss + (self.s_r + self.s_c + self.s_id) #Automatic Loss Balancing        
+            return alb_loss, rpn_box_loss, rpn_class_loss, rpn_id_loss
         else:
-            mean_box_loss = []
-            mean_conf_loss = []
+            rpn_box_loss = []
+            rpn_class_loss = []
             for label, pred, emb in zip(labels, preds, embs):
                 lbox, lconf = self.compute_loss_rpn_level(label, pred, emb, training)
-                mean_box_loss.append(lbox)
-                mean_conf_loss.append(lconf)
-            mean_box_loss, mean_conf_loss = tf.reduce_mean(mean_box_loss,axis=0), tf.reduce_mean(mean_conf_loss,axis=0)
-            alb_loss = tf.math.exp(-self.s_r)*mean_box_loss + tf.math.exp(-self.s_c)*mean_conf_loss \
+                rpn_box_loss.append(lbox)
+                rpn_class_loss.append(lconf)
+            rpn_box_loss, rpn_class_loss = tf.reduce_mean(rpn_box_loss,axis=0), tf.reduce_mean(rpn_class_loss,axis=0)
+            alb_loss = tf.math.exp(-self.s_r)*rpn_box_loss + tf.math.exp(-self.s_c)*rpn_class_loss \
                         + (self.s_r + self.s_c) #Automatic Loss Balancing        
-            return alb_loss, mean_box_loss, mean_conf_loss
+            return alb_loss, rpn_box_loss, rpn_class_loss
 
     @tf.function
     def compute_loss_rpn_level(self, label, pred, emb, training):
@@ -319,21 +319,21 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
     def print_loss(self, losses, training=True):
         if training:
             res = "=> STEP {}/{}  lr: {:0.5f}  auto_loss_bal: "\
-                "{:0.5f}  mean_box_loss: {:0.5f}  mean_conf_loss: {:0.5f}  "\
+                "{:0.5f}  rpn_box_loss: {:0.5f}  rpn_class_loss: {:0.5f}  "\
                 "".format(self.step_train, self.step_trains, self.optimizer.lr.numpy(), 
                           losses[0], losses[1], losses[2])
             if self.emb:
-                res += "mean_id_loss: {:0.5f}  ".format(losses[3])
+                res += "rpn_id_loss: {:0.5f}  ".format(losses[3])
             if self.mask:
                res += "mrcnn_class_loss: {:0.5f}  mrcnn_box_loss: {:0.5f}"\
                "  mrcnn_mask_loss: {:0.5f}".format(losses[-3], losses[-2], losses[-1])
             tf.print(res)
         else:
-            res = "=> STEP {}  auto_loss_bal: {:0.5f}  mean_box_loss: "\
-                "{:0.5f}   mean_conf_loss: {:0.5f} ".format(self.step_val, losses[0], 
+            res = "=> STEP {}  auto_loss_bal: {:0.5f}  rpn_box_loss: "\
+                "{:0.5f}   rpn_class_loss: {:0.5f} ".format(self.step_val, losses[0], 
                  losses[1], losses[2])
             if self.emb:
-                res += "mean_id_loss: {:0.5f}  ".format(losses[3])
+                res += "rpn_id_loss: {:0.5f}  ".format(losses[3])
             if self.mask:
                 res += "mrcnn_class_loss: {:0.5f}  mrcnn_box_loss: "\
                     "{:0.5f}   mrcnn_mask_loss: {:0.5f}".format(losses[-3], losses[-2], losses[-1])
@@ -350,11 +350,11 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                     with tf.name_scope('rpn'):
                         tf.summary.scalar("s_c", tf.squeeze(self.s_c), step=step)
                         tf.summary.scalar("s_r", tf.squeeze(self.s_r), step=step)
-                        tf.summary.scalar("mean_box_loss", tf.squeeze(losses[1]), step=step)
-                        tf.summary.scalar("mean_conf_loss", tf.squeeze(losses[2]), step=step)
+                        tf.summary.scalar("rpn_box_loss", tf.squeeze(losses[1]), step=step)
+                        tf.summary.scalar("rpn_class_loss", tf.squeeze(losses[2]), step=step)
                         if self.emb:
                             tf.summary.scalar("s_id", tf.squeeze(self.s_id), step=step)
-                            tf.summary.scalar("mean_id_loss", tf.squeeze(losses[3]), step=step)
+                            tf.summary.scalar("rpn_id_loss", tf.squeeze(losses[3]), step=step)
                     with tf.name_scope('mrcnn'): 
                         if self.mask:
                             tf.summary.scalar("s_mc", tf.squeeze(self.s_mc), step=step)
