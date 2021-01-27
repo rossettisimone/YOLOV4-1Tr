@@ -31,7 +31,7 @@ from loader import DataLoader
 
 
 ds = DataLoader(shuffle = True)
-model = MSDS(data_loader = ds, emb = False, mask = True)
+model = MSDS(data_loader = ds, emb = False, mask = False)
 model.custom_build()
 #model.plot()
 #model.bkbn.model.summary() 

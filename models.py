@@ -87,7 +87,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             self.step_val = 0
             self.batch = cfg.BATCH
             self.steps_per_epoch = cfg.STEPS_PER_EPOCH
-            self.step_trains = self.epochs * self.steps_per_epoch * self.batch
+            self.step_trains = self.epochs * self.steps_per_epoch
         self.freeze_bkbn = freeze_bkbn
         self.freeze_bn = freeze_bn
         self.LEVELS = cfg.LEVELS
@@ -109,9 +109,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.neck = fpn()
         #YOLO LIKE
         self.head = rpn() 
-        
-        self.proposal = ProposalLayer() #proposal + embedding
-                
+            
         self.s_c = tf.Variable(initial_value=[0.0], trainable=True) #-4.15
         self.s_r = tf.Variable(initial_value=[0.0], trainable=True) # -4.85
         
@@ -121,6 +119,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             self.classifier.build((tf.newaxis,self.emb_dim))
             
         if self.mask:
+            self.proposal = ProposalLayer() #proposal + embedding
             self.fpn_classifier = fpn_classifier_AFP()            
             self.fpn_mask = fpn_mask_AFP()
             self.s_mc = tf.Variable(initial_value=[0.0], trainable=True) 
@@ -131,13 +130,13 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         features = self.bkbn(input_layers, training)
         pyramid = self.neck(features, training)
         rpn_pred, rpn_embeddings = self.head(pyramid, training, inferring) # (proposal, embedding),...(proposal_embedding) for each piramid level
-        rpn_proposals = self.proposal(rpn_pred, rpn_embeddings, training, inferring) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
         if self.mask:
+            rpn_proposals = self.proposal(rpn_pred, rpn_embeddings, training, inferring) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox = self.fpn_classifier([rpn_proposals[...,:4],rpn_embeddings])
             mrcnn_mask = self.fpn_mask([rpn_proposals[...,:4],rpn_embeddings])
             return rpn_pred, rpn_embeddings, rpn_proposals, mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask
         else:
-            return rpn_pred, rpn_embeddings, rpn_proposals
+            return rpn_pred, rpn_embeddings
     
     def get_input_shape(self):
         return tf.zeros((cfg.BATCH,cfg.TRAIN_SIZE,cfg.TRAIN_SIZE, 3))
@@ -157,18 +156,18 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
                 self.mean_total_loss = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
             else:
-                preds, embs, proposals = self(image, training=training, inferring=inferring)
+                preds, embs = self(image, training=training, inferring=inferring)
                 self.mean_total_loss = self.compute_loss_rpn(labels, preds, embs, training)
             
             gradients = tape.gradient(self.mean_total_loss, self.trainable_variables)
             self.optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, self.trainable_variables) if grad is not None)
-            self.loss_summary(training)
         res = "=> STEP %4d/%4d   lr: %.6f  mean_total_loss: %4.2f  mean_box_loss: %4.2f   mean_conf_loss: %4.2f  " % (self.step_train, self.step_trains, self.optimizer.lr.numpy(), self.mean_total_loss, self.mean_box_loss, self.mean_conf_loss)
         if self.emb:
             res += "mean_id_loss: %4.2f  "%(self.mean_id_loss)
         if self.mask:
            res += "mrcnn_class_loss: %4.2f  mrcnn_box_loss: %4.2f   mrcnn_mask_loss: %4.2f" % (self.mrcnn_class_loss, self.mrcnn_box_loss, self.mrcnn_mask_loss)
         tf.print(res)
+        self.loss_summary(training)
                         
     def compute_loss(self, labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
         # rpn loss        
@@ -252,7 +251,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
             self.mean_total_loss = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
         else:
-            preds, embs, proposals = self(image, training=training, inferring=inferring)
+            preds, embs = self(image, training=training, inferring=inferring)
             self.mean_total_loss = self.compute_loss_rpn(labels, preds, embs, training)
         res = "=> STEP %4d  mean_total_loss: %4.2f  mean_box_loss: %4.2f   mean_conf_loss: %4.2f " % (self.step_val, self.mean_total_loss, self.mean_box_loss, self.mean_conf_loss)
         if self.emb:
@@ -260,6 +259,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         if self.mask:
            res += "mrcnn_class_loss: %4.2f  mrcnn_box_loss: %4.2f   mrcnn_mask_loss: %4.2f" % (self.mrcnn_class_loss, self.mrcnn_box_loss, self.mrcnn_mask_loss)
         tf.print(res)
+        self.loss_summary(training)
         
     def fit(self, epochs = None, start_epoch = 0):
         assert self.ds is not None, 'please pass a DataLoader'
@@ -274,7 +274,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.bkbn.trainable = True
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
-            self.adapt_lr()
+            # self.adapt_lr()
             for data in self.train_ds.take(self.steps_per_epoch*self.batch).batch(self.batch):
                 self.train_step(data)
             path = "./weights/%s_%s_%s_%d_%4.2f_%s.tf"%(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch,self.mean_total_loss,datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
@@ -288,13 +288,15 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
     def infer(self, image):
         training = True
         inferring = True
-        preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training, inferring=inferring)
-#        proposals = nms_proposals(proposals)
-        if len(proposals)==0:
-            tf.print('None')
+        if self.mask:
+            preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training, inferring=inferring)
+        else:
+            preds, embs = self(image, training=training, inferring=inferring)
+            proposals = ProposalLayer()(preds, embs, training, inferring)
+
         for i,proposal in enumerate(proposals):
-            if len(proposal)>0:
-                bboxs = proposal[...,:4]
+            if tf.reduce_sum(proposal)>0:
+                bboxs = proposal[...,:4]*cfg.TRAIN_SIZE
 #                confs = proposal[...,4] 
 #                embs = proposal[...,5:] # needed for tracking
                 # Final proposals are obtained in dets. Information of bounding box and embeddings also included
@@ -399,9 +401,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         if self.epoch < self.epochs * 0.5 :
             lr = cfg.LR
         elif self.epoch <= self.epochs * 0.75 and self.epoch > self.epochs * 0.5:
-            lr = cfg.LR * 0.01
+            lr = cfg.LR * 0.1
         else:
-            lr = cfg.LR * 0.001
+            lr = cfg.LR * 0.01
         self.optimizer.lr.assign(lr)
         
     def save(self, name):
