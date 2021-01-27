@@ -244,7 +244,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             alb_loss = tf.math.exp(-self.s_mc)*mrcnn_class_loss + tf.math.exp(-self.s_mr)*mrcnn_box_loss \
                     + tf.math.exp(-self.s_mm)*mrcnn_mask_loss + (self.s_mr + self.s_mc + self.s_mm) #Automatic Loss Balancing        
         else:
-            alb_loss = tf.constant(0.0)
+            alb_loss = mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss
         return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss
    
     @tf.function

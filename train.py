@@ -62,6 +62,9 @@ model.fit()
 #import matplotlib.pyplot as plt
 #import numpy as np
 
+
+
+
 #import time
 #import contextlib
 #@contextlib.contextmanager
@@ -83,6 +86,10 @@ model.fit()
 #        fps+=1/(time.time()-t0)
 #        print(fps/i)
 
+
+
+
+
 #    print(gt_masks)
 #    a=1
 #    plt.imshow(image[0])
@@ -93,7 +100,6 @@ model.fit()
 #            print(bboxes[0,i])
 #            plt.imshow(m)
 #            plt.show()
-    
 #    model.draw_bbox(image[0], bboxes[0][...,:4], bboxes[0][...,4:])
 #    training = True
 #    inferring = True
