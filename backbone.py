@@ -16,7 +16,7 @@ class cspdarknet53(tf.keras.Model):
         self.model = self.build_graph()
         if pretrained:
             load_weights_cspdarknet53(self.model, cfg.CSP_DARKNET53)
-            self.model.trainable=False
+            self.trainable=False
         
     def call(self, input_layers, training=False):
         return self.model(input_layers)

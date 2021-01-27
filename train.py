@@ -31,7 +31,7 @@ from loader import DataLoader
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/logdir --port 6006
 # fiorapirri@fiorapirri-GL502VSK:~$ scp alcor@Alcor:/media/data4/Models/simenv/tracker/weights/checkpoint /home/fiorapirri/Documents/workspace/tracker4/weights/checkpoint
 
-ds = DataLoader(shuffle=True, data_aug=False)
+ds = DataLoader(shuffle=True, data_aug=True)
 #with mirrored_strategy.scope():
 model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()

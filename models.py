@@ -86,8 +86,8 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             self.step_train = 0
             self.step_val = 0
             self.batch = cfg.BATCH
-            self.steps_per_epoch = cfg.STEPS_PER_EPOCH
-            self.step_trains = self.epochs * self.steps_per_epoch
+            self.steps_train = cfg.STEPS_PER_EPOCH_TRAIN
+            self.steps_val = cfg.STEPS_PER_EPOCH_VAL
         self.freeze_bkbn = freeze_bkbn
         self.freeze_bn = freeze_bn
         self.LEVELS = cfg.LEVELS
@@ -153,6 +153,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         with tf.GradientTape() as tape:
             if self.mask:
                 preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
+                proposals = proposals[...,:4]
                 target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
                 alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
             else:
@@ -255,16 +256,17 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         labels = [label_2, labe_3, label_4, label_5]
         if self.mask:
             preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
-            target_class_ids, target_bbox, target_masks = +(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-            alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+            proposals = proposals[...,:4]
+            target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+            alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
         else:
             preds, embs = self(image, training=training, inferring=inferring)
             alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
-            
+        
         return [alb_total_loss] + loss_list
         
     def fit(self, epochs = None, start_epoch = 0):
-        assert self.ds is not None, 'please pass a DataLoader'
+        assert self.ds is not None, 'DataLoader is required'
         if epochs is not None:
             self.epochs = epochs
         self.start_epoch = start_epoch
@@ -277,20 +279,22 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
             self.adapt_lr()
-            for data in self.train_ds.take(self.steps_per_epoch*self.batch).batch(self.batch):
+            self.set_trainable(True)
+            for data in self.train_ds.take(self.steps_train * self.batch).batch(self.batch):
                 self.step_train += 1
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
-            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, losses[0],datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
-            self.save(path)
             gc.collect()
-            for data in self.val_ds.take(100*self.batch).batch(self.batch):
+            self.set_trainable(False, True)
+            for data in self.val_ds.take(self.steps_val * self.batch).batch(self.batch):
                 self.step_val += 1
                 losses = self.test_step(data) 
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
             gc.collect()
+            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, losses[0],datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            self.save(path)
     
     @tf.function
     def infer(self, image):
@@ -318,9 +322,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
     
     def print_loss(self, losses, training=True):
         if training:
-            res = "=> STEP {}/{}  lr: {:0.5f}  auto_loss_bal: "\
+            res = "=> EPOCH {}  TRAIN STEP {}/{}  lr: {:0.5f}  auto_loss_bal: "\
                 "{:0.5f}  rpn_box_loss: {:0.5f}  rpn_class_loss: {:0.5f}  "\
-                "".format(self.step_train, self.step_trains, self.optimizer.lr.numpy(), 
+                "".format(self.epoch, self.step_train % self.steps_train, self.steps_train, self.optimizer.lr.numpy(), 
                           losses[0], losses[1], losses[2])
             if self.emb:
                 res += "rpn_id_loss: {:0.5f}  ".format(losses[3])
@@ -329,9 +333,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                "  mrcnn_mask_loss: {:0.5f}".format(losses[-3], losses[-2], losses[-1])
             tf.print(res)
         else:
-            res = "=> STEP {}  auto_loss_bal: {:0.5f}  rpn_box_loss: "\
-                "{:0.5f}   rpn_class_loss: {:0.5f} ".format(self.step_val, losses[0], 
-                 losses[1], losses[2])
+            res = "=> EPOCH {}  VAL STEP {}/{}  auto_loss_bal: {:0.5f}  rpn_box_loss: "\
+                "{:0.5f}   rpn_class_loss: {:0.5f} ".format(self.epoch, self.step_val % self.steps_val, self.steps_val,
+                 losses[0], losses[1], losses[2])
             if self.emb:
                 res += "rpn_id_loss: {:0.5f}  ".format(losses[3])
             if self.mask:
@@ -379,7 +383,12 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                         preactivate = tf.matmul(input_tensor, self.classifier.kernel) + self.classifier.bias
                         tf.summary.histogram('output', preactivate, step=step)
         self.writer.flush()
-
+        
+    def set_trainable(self, trainable = True, backbone = False):
+        start = 0 if backbone else 1
+        for net in self.layers[start:]:
+            net.trainable = trainable
+            
     def freeze_batch_normalization(self):
         for net in self.layers:
             if net.name == 'cspdarknet53':
