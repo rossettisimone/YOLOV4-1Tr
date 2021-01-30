@@ -12,7 +12,7 @@ ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/datase
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 8
+BATCH = 6
 TRAIN_SIZE = 416#416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20

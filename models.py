@@ -5,9 +5,9 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 import config as cfg
 from backbone import cspdarknet53
-from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode,ProposalLayer, PyramidROIAlign_AFP
+from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode,CustomProposalLayer, PyramidROIAlign_AFP
 import gc
-from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox
+from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss
 from datetime import datetime
 
 class fpn(tf.keras.Model):
@@ -53,11 +53,11 @@ class rpn(tf.keras.Model):
         
         self.heads = [CustomDecode(level, n=level+1) for level in range(cfg.LEVELS)]
         
-    def call(self, input_layers, training=False, inferring=False):
+    def call(self, input_layers, training=False):
         preds = []
         embs = []
         for i in range(cfg.LEVELS):
-            x = self.heads[i](input_layers[i], training, inferring)
+            x = self.heads[i](input_layers[i], training)
             preds.append(x[0])
             embs.append(x[1])
         return preds, embs
@@ -97,9 +97,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.emb_dim = cfg.EMB_DIM 
         self.writer = tf.summary.create_file_writer(cfg.SUMMARY_LOGDIR)
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
-        self.SmoothL1Loss = tf.keras.losses.Huber(delta=1.0)
+#        self.SmoothL1Loss = tf.keras.losses.Huber(delta=1.0)
 #        self.SoftmaxLoss = SoftmaxLoss()
-        self.CrossEntropyLossLogits = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+#        self.CrossEntropyLossLogits = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)#
 #        self.strategy = tf.distribute.MirroredStrategy()
 
@@ -119,19 +119,22 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             self.classifier.build((tf.newaxis,self.emb_dim))
             
         if self.mask:
-            self.proposal = ProposalLayer() #proposal + embedding
+            self.proposal = CustomProposalLayer() #proposal + embedding
             self.fpn_classifier = fpn_classifier_AFP()            
             self.fpn_mask = fpn_mask_AFP()
             self.s_mc = tf.Variable(initial_value=0.0, trainable=True) 
             self.s_mr = tf.Variable(initial_value=0.0, trainable=True)
             self.s_mm = tf.Variable(initial_value=0.0, trainable=True)
     
-    def call(self, input_layers, training=False, inferring=False):
+    def call(self, input_layers, training=False):
         features = self.bkbn(input_layers, training)
         pyramid = self.neck(features, training)
-        rpn_pred, rpn_embeddings = self.head(pyramid, training, inferring) # (proposal, embedding),...(proposal_embedding) for each piramid level
+        rpn_pred, rpn_embeddings = self.head(pyramid, training) # (proposal, embedding),...(proposal_embedding) for each piramid level
         if self.mask:
-            rpn_proposals = self.proposal(rpn_pred, rpn_embeddings, training, inferring) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
+            if self.emb:
+                rpn_proposals = self.proposal(rpn_pred, rpn_embeddings) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
+            else:
+                rpn_proposals = self.proposal(rpn_pred) # p,e = proposals, embeddings [batch, rois, (x1, y1, x2, y2, embeddings...)]
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox = self.fpn_classifier([rpn_proposals[...,:4],rpn_embeddings])
             mrcnn_mask = self.fpn_mask([rpn_proposals[...,:4],rpn_embeddings])
             return rpn_pred, rpn_embeddings, rpn_proposals, mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask
@@ -147,24 +150,21 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
     @tf.function
     def train_step(self, data):
         training = True
-        inferring = False
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
         labels = [label_2, labe_3, label_4, label_5]
         with tf.GradientTape() as tape:
             if self.mask:
-                preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
+                preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training)
                 proposals = proposals[...,:4]
                 target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
                 alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
             else:
-                preds, embs = self(image, training=training, inferring=inferring)
+                preds, embs = self(image, training=training)
                 alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
-            
             gradients = tape.gradient(alb_total_loss, self.trainable_variables)
             self.optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, self.trainable_variables) if grad is not None)
         return [alb_total_loss] + loss_list
     
-    @tf.function                    
     def compute_loss(self, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
         # rpn loss 
         alb_total_loss, *rpn_loss_list = self.compute_loss_rpn(labels, preds, embs, training)
@@ -175,7 +175,6 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
 
         return [alb_total_loss] + rpn_loss_list + mrcnn_loss_list
 
-    @tf.function
     def compute_loss_rpn(self, labels, preds, embs, training):
         if self.emb:
             rpn_box_loss = []
@@ -202,20 +201,20 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                         + (self.s_r + self.s_c) #Automatic Loss Balancing        
             return alb_loss, rpn_box_loss, rpn_class_loss
 
-    @tf.function
     def compute_loss_rpn_level(self, label, pred, emb, training):
         pbox = pred[..., :4]
         pconf = pred[..., 4:6]
         tbox = label[...,:4]
         tconf = label[...,4]
-        mask = tconf>0
-        if tf.reduce_sum(tf.cast(mask,tf.float32))>0:
-            lbox = self.SmoothL1Loss(tf.boolean_mask(tbox,mask),tf.boolean_mask(pbox,mask))
+        mask = tf.greater(tconf,0.0)
+        if tf.greater(tf.reduce_sum(tf.cast(mask,tf.float32)),0.0):
+            lbox = tf.reduce_mean(smooth_l1_loss(y_true = tf.boolean_mask(tbox,mask),y_pred = tf.boolean_mask(pbox,mask)))
         else:
             lbox = tf.constant(0.0)
-        pconf = entry_stop_gradients(pconf, tconf[...,tf.newaxis]<0) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
-        tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf), tf.int32)
-        lconf =  self.CrossEntropyLossLogits(tconf,pconf) # apply softmax and do non negative log likelihood loss 
+        non_negative_entry = tf.cast(tf.greater_equal(tconf[...,tf.newaxis],0.0),tf.float32)
+        pconf = entry_stop_gradients(pconf, non_negative_entry) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
+        tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf),tf.int32)
+        lconf =  tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf)) # apply softmax and do non negative log likelihood loss 
         if self.emb:
             tids = label[...,5:6]
             emb_mask = tf.cast(tf.math.reduce_max(tf.cast(mask, tf.float32), axis=1), tf.bool)
@@ -223,11 +222,12 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             tids = tids[emb_mask]
             embedding = tf.boolean_mask(emb,emb_mask)
             embedding = self.emb_scale * tf.math.l2_normalize(embedding,axis=1, epsilon=1e-12)
-            if tf.shape(tids)[0]>0:
+            if tf.greater(tf.shape(tids)[0],0.0):
                 logits = self.classifier(embedding) 
-                logits = entry_stop_gradients(logits,tids<0)
-                tids = tf.cast(tf.where(tf.less(tids, 0.0), 0.0, tids),tf.int32) # stop gradient for regions labeled -1
-                lid = self.CrossEntropyLossLogits(tf.squeeze(tids,axis=-1),logits)
+                non_negative_entry = tf.greater_equal(tids,0.0)
+                logits = entry_stop_gradients(logits,tf.cast(non_negative_entry,tf.float32))
+                tids = tf.cast(tf.where(tf.logical_not(non_negative_entry), 0.0, tids),tf.int32) # stop gradient for regions labeled -1
+                lid = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(tf.squeeze(tids,axis=-1),logits))
             else:
                 lid = tf.constant(0.0)
             self.classifier_summary(embedding, training)
@@ -235,32 +235,29 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         else:
             return lbox, lconf
 
-    @tf.function
     def compute_loss_mrcnn(self, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks):
         # prepare the ground truth
         mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
         mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
         mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
-        if tf.reduce_sum(proposals)>0:
+        if tf.greater(tf.reduce_sum(proposals),0.0):
             alb_loss = tf.math.exp(-self.s_mc)*mrcnn_class_loss + tf.math.exp(-self.s_mr)*mrcnn_box_loss \
                     + tf.math.exp(-self.s_mm)*mrcnn_mask_loss + (self.s_mr + self.s_mc + self.s_mm) #Automatic Loss Balancing        
         else:
             alb_loss = mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss
         return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss
    
-    @tf.function
     def test_step(self, data):
         training = False
-        inferring = False
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
         labels = [label_2, labe_3, label_4, label_5]
         if self.mask:
-            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training, inferring=inferring)
+            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training)
             proposals = proposals[...,:4]
             target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
             alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
         else:
-            preds, embs = self(image, training=training, inferring=inferring)
+            preds, embs = self(image, training=training)
             alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
         
         return [alb_total_loss] + loss_list
@@ -287,30 +284,32 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.print_loss(losses, training=True)
             gc.collect()
             self.set_trainable(False, True)
+            mean_loss = []
             for data in self.val_ds.take(self.steps_val * self.batch).batch(self.batch):
                 self.step_val += 1
                 losses = self.test_step(data) 
+                mean_loss.append(losses[0])
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
             gc.collect()
-            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, losses[0],datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
     
     @tf.function
     def infer(self, image):
         training = True
-        inferring = True
         if self.mask:
-            preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training, inferring=inferring)
+            preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training)
+            #decode_delta(encoded_gt_bboxes, valid_proposals)
         else:
-            preds, embs = self(image, training=training, inferring=inferring)
-            proposals = ProposalLayer()(preds, embs, training, inferring)
+            preds, embs = self(image, training=training)
+            proposals = CustomProposalLayer()(preds, embs, training)
         
         nB = tf.shape(image)[0]
         for i in range(nB):
             proposal = proposals[i]
-            if tf.reduce_sum(proposal)>0:
-                valid = tf.reduce_sum(tf.cast(tf.reduce_sum(proposals, axis=-1)>0,tf.int32))
+            if tf.greater(tf.reduce_sum(proposal),0.0):
+                valid = tf.reduce_sum(tf.cast(tf.greater(tf.reduce_sum(proposals, axis=-1),0.0),tf.int32))
                 proposal = proposal[:valid,:]           
                 bboxs = proposal[...,:4]*cfg.TRAIN_SIZE
                 confs = proposal[...,4] 
@@ -486,7 +485,7 @@ class fpn_classifier_AFP(tf.keras.Model):
                                         cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
     def get_output_shape(self):
         return [out.shape for out in self.call(self.get_input_shape())]
-        
+
 def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=1024):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
@@ -536,9 +535,9 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
                            name="mrcnn_class_shared")(x)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
-    shared = tf.keras.layers.Lambda(lambda x: tf.keras.backend.squeeze(tf.keras.backend.squeeze(x, 3), 2),
-                       name="pool_squeeze")(x)
-
+    shared = tf.keras.layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name="pool_squeeze")(x)
+    #shared = tf.keras.layers.Lambda(lambda x: tf.keras.backend.squeeze(tf.keras.backend.squeeze(x, 3), 2),
+    #                       name="pool_squeeze")(x)
     # Classifier head
     mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes),
                                             name='mrcnn_class_logits')(shared)
@@ -550,8 +549,8 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes * 4, activation='linear'),
                            name='mrcnn_bbox_fc')(shared)
     # Reshape to [batch, num_rois, NUM_CLASSES, (dx, dy, log(dw), log(dh))]
-    s = tf.keras.backend.int_shape(x)
-    mrcnn_bbox = tf.keras.layers.Reshape((s[1], num_classes, 4), name="mrcnn_bbox")(x)
+#    s = tf.keras.backend.int_shape(x)
+    mrcnn_bbox = tf.keras.layers.Reshape((x.shape.as_list()[1], num_classes, 4), name="mrcnn_bbox")(x)
 
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
@@ -572,7 +571,7 @@ class fpn_mask_AFP(tf.keras.Model):
                                         cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
     def get_output_shape(self):
         return self.call(self.get_input_shape()).shape
-    
+
 def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=2):
     """Builds the computation graph of the mask head of Feature Pyramid Network.
     rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
@@ -627,7 +626,7 @@ def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes
                               name="mrcnn_mask_conv5")(x_ff)
     x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn5')(x_ff)
     x_ff = tf.keras.layers.Activation('relu')(x_ff)
-    x_ff_shape = tf.keras.backend.int_shape(x_ff)
+    x_ff_shape = x_ff.shape.as_list()
     x_ff = tf.keras.layers.Reshape((x_ff_shape[1], x_ff_shape[2]*x_ff_shape[3]*x_ff_shape[4]))(x_ff)
     x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(pool_size*pool_size*2*2, activation='relu'), name='mrcnn_mask_fc')(x_ff)
 

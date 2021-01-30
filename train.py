@@ -7,6 +7,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
 import tensorflow as tf
 #tf.get_logger().setLevel('WARNING')
 tf.compat.v1.reset_default_graph()
+#tf.debugging.enable_check_numerics()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
@@ -29,7 +30,7 @@ from models import MSDS
 from loader import DataLoader 
 
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/logdir --port 6006
-# fiorapirri@fiorapirri-GL502VSK:~$ scp alcor@Alcor:/media/data4/Models/simenv/tracker/weights/checkpoint /home/fiorapirri/Documents/workspace/tracker4/weights/checkpoint
+# scp /home/fiorapirri/Documents/workspace/tracker4/weights/yolov4.weights alcor@Alcor:/media/data4/Models/simenv/tracker/weights/yolov4.weights
 
 ds = DataLoader(shuffle=True, data_aug=True)
 #with mirrored_strategy.scope():
@@ -44,6 +45,9 @@ model.summary()
 #model.trainable = False # too fucking important for inferring
 model.fit()
 
+#/home/fiorapirri/.local/lib/python3.8/site-packages/tensorflow/python/framework/indexed_slices.py:435: UserWarning: Converting sparse IndexedSlices(IndexedSlices(indices=Tensor("gradient_tape/MSDS/proposal_layer/while_4/gradients/MSDS/proposal_layer/while_4/GatherV2_grad/Reshape_1:0", shape=(None,), dtype=int64), values=Tensor("gradient_tape/MSDS/proposal_layer/while_4/gradients/MSDS/proposal_layer/while_4/GatherV2_grad/Reshape:0", shape=(None, None), dtype=float32), dense_shape=Tensor("gradient_tape/MSDS/proposal_layer/while_4/gradients/MSDS/proposal_layer/while_4/GatherV2_grad/Cast:0", shape=(2,), dtype=int32))) to a dense Tensor of unknown shape. This may consume a large amount of memory.
+#  warnings.warn(
+          
 #import time
 #avg = 0
 #start = time.time()

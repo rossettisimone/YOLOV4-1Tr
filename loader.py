@@ -41,6 +41,11 @@ class Generator(object):
     def data_pad_max_instances(self, masks, bboxes, max_instances):
         bboxes_padded = np.zeros((max_instances,5))
         bboxes_padded[:,4]=-1
+        #check consistency of bbox
+        masks = masks[bboxes[...,2]>bboxes[...,0]]
+        masks = masks[bboxes[...,3]>bboxes[...,1]]
+        bboxes = bboxes[bboxes[...,2]>bboxes[...,0]]
+        bboxes = bboxes[bboxes[...,3]>bboxes[...,1]]
         min_bbox = min(bboxes.shape[0], max_instances)
         bboxes_padded[:min_bbox,:]=bboxes[:min_bbox,:]
         masks_padded = np.zeros((max_instances,masks.shape[1],masks.shape[2]))
@@ -96,8 +101,9 @@ class Generator(object):
             if len(box)==8: # Siammask returns 4 coordinates, 8 scalars instead
                 xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
                 box=np.array([min(xx),min(yy),max(xx),max(yy)])
-            if not np.all(box==0):
+            if not np.all(box==0) and box[2]>box[0] and box[3]>box[1]:
                 box = np.r_[box,1]*np.array([width, height, width, height, person['p_id_2']])
+                
                 try:
                      mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))
                 except:
