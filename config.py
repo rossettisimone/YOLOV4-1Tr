@@ -12,8 +12,8 @@ ANNOTATION_PATH = "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 8
-TRAIN_SIZE = 416
+BATCH = 6
+TRAIN_SIZE = 416#416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
 

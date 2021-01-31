@@ -5,11 +5,9 @@ Created on Mon Dec 21 18:37:18 2020
 
 @author: fiorapirri
 """
-
-
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, nms_proposals, get_top_proposals
+from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, suppress_and_order_proposals_by_score
 
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
@@ -149,77 +147,70 @@ class CustomDecode(tf.keras.layers.Layer):
         self.conv_2 = CustomConv2D(kernel_size = 3, filters = self.filters, n=2) #64/128/..
         self.conv_3 = CustomConv2D(kernel_size = 1, filters = self.bbox_filters, activate=False, bn=False, n=3)#24
         
-    def call(self, input_layer, training = False, inferring = False): # align = False
+    def call(self, input_layer, training = False): # align = False
         emb = self.conv_1(input_layer, training)
         pred = self.conv_2(input_layer, training)
         pred = self.conv_3(pred, training)
-        pred = self.decode(pred, training, inferring) #align
+        pred = self.decode(pred) #align
         return pred, emb
     
-    def decode(self, pred, training, inferring):#align
+    def decode(self, pred):#align
 #        if training and not inferring: # b x 104 x 104 x 24 -> b x 104 x 104 x 4 x 6
         return tf.transpose(tf.reshape(pred, [tf.shape(pred)[0], cfg.TRAIN_SIZE//cfg.STRIDES[self.LEVEL], cfg.TRAIN_SIZE//cfg.STRIDES[self.LEVEL], cfg.NUM_ANCHORS, cfg.NUM_CLASS + 5]), perm = [0, 3, 1, 2, 4])#, pemb  # prediction        
-#        
-#        if training: #and inferring:
 
-
-#        if align:
-#            pred = tf.transpose(tf.reshape(pred, [tf.shape(pred)[0], tf.shape(pred)[1], tf.shape(pred)[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS + 5]), perm = [0, 3, 1, 2, 4])
-#            pbox = pred[..., :4]
-#            pconf = pred[..., 4:6]  # Conf
-#            pconf = tf.keras.activations.softmax(pconf, axis=-1)[...,1][...,tf.newaxis]
-#            pemb = tf.math.l2_normalize(tf.tile(pemb[:,tf.newaxis],[1,cfg.NUM_ANCHORS,1,1,1]),axis=-1, epsilon=1e-12)
-#            pcls = tf.zeros((tf.shape(pred)[0], tf.shape(pred)[1], tf.shape(pred)[2], tf.shape(pred)[3],1)) # useless
-#            pbox = decode_delta_map(pbox, self.ANCHORS/self.STRIDE)
-#            pred = tf.concat([pbox, pconf, pcls, pemb], axis=-1)
-#            pred = pred[pred[..., 4] > cfg.CONF_THRESH]
-#            feature_map = pred[...,5:]
-#            rois = pred[...,:4]
-#            rois = tf.reshape(rois, (rois.shape[0],-1,rois.shape[-1]))
-#            return self.align(feature_map, rois), rois
-
-
-class ProposalLayer(tf.keras.layers.Layer):
+class CustomProposalLayer(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
-        super(ProposalLayer, self).__init__(**kwargs)
+        super(CustomProposalLayer, self).__init__(**kwargs)
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
         self.TRAIN_SIZE = tf.constant(cfg.TRAIN_SIZE,dtype=tf.float32)
-    def call(self, predictions, embeddings, training = False, inferring = False):
-        """ predictions: b x h x w x 4 x 6; embeddings: b x h x w x 208 """
+
+    def call(self, predictions, embeddings = None):
+        """ predictions: b x 4 x h x w x 6; embeddings: b x h x w x emb (=208) """
         proposals = []
         for i in range(cfg.LEVELS):
-            pred, pemb = predictions[i], embeddings[i]
-            pbox = pred[..., :4]
+            pred = predictions[i]
             pconf = pred[..., 4:6]  # Conf
             pconf = tf.nn.softmax(pconf, axis=-1)[...,1][...,tf.newaxis] # 1 is foreground
+            pbox = pred[..., :4]
             pbox = decode_delta_map(pbox, self.ANCHORS[i]/self.STRIDES[i])
             pbox *= self.STRIDES[i] # now in range [0, .... cfg.TRAIN_SIZE]
             pbox /= self.TRAIN_SIZE #now normalized in [0...1]
-            pemb = tf.math.l2_normalize(tf.tile(pemb[:,tf.newaxis],(1,cfg.NUM_ANCHORS,1,1,1)), axis=-1, epsilon=1e-12)
-            preds = tf.concat([pbox, pconf, pemb], axis=-1)
+            preds = tf.concat([pbox, pconf], axis=-1)
+            
+            if embeddings:
+                pemb = embeddings[i]
+                pemb = tf.math.l2_normalize(tf.tile(pemb[:,tf.newaxis],(1,cfg.NUM_ANCHORS,1,1,1)), axis=-1, epsilon=1e-12)
+                preds = tf.concat([preds, pemb], axis=-1)     
+                
             proposal = tf.reshape(preds, [tf.shape(preds)[0], -1, tf.shape(preds)[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
-            proposal = get_top_proposals(proposal)
+            proposal = tf.map_fn(suppress_and_order_proposals_by_score, proposal, fn_output_signature=tf.float32)
             proposals.append(proposal)
+            
         proposals = tf.concat(proposals,axis=1) #concat along levels
-        boxes = tf.clip_by_value(xywh2xyxy(proposals[...,:4]), clip_value_min=0.0,clip_value_max=1.0)
-        proposals = tf.concat([boxes,proposals[...,4:]],axis=-1) # to bbox
-        proposals = nms_proposals(proposals)
+        boxes = xywh2xyxy(proposals[...,:4]) # to bbox
+        boxes = tf.clip_by_value(boxes,0.0,1.0)
+        proposals = tf.concat([boxes,proposals[...,4:]],axis=-1) 
+        proposals = tf.map_fn(nms_proposals, proposals, fn_output_signature=tf.float32)
+        mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
+        proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
         return proposals
     
-#    def get_input_shape(self):
-#        return [tf.keras.layers.Input((cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)]
-#        
-#    def get_output_shape(self):
-#        return self.call([tf.zeros((cfg.BATCH, cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)]).shape
-#
+    def get_input_shape(self):
+#        return [tf.random.uniform((cfg.BATCH, cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)], [tf.random.uniform((cfg.BATCH, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
+        return [tf.random.uniform((cfg.BATCH, cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)], None
+    
+    def get_output_shape(self):
+        pred, emb = self.get_input_shape()
+        return self.call(pred, emb).shape
+
 ############################################################
 #  ROIAlign Layer
 ############################################################
 
-def log2_graph(x):
-    """Implementation of Log2. TF doesn't have a native implementation."""
-    return tf.math.log(x) / tf.math.log(2.0)
+#def log2_graph(x):
+#    """Implementation of Log2. TF doesn't have a native implementation."""
+#    return tf.math.log(x) / tf.math.log(2.0)
 
 class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
@@ -238,7 +229,7 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     constructor.
     """
 
-    def __init__(self, pool_shape, **kwargs):
+    def __init__(self, pool_shape = (cfg.POOL_SIZE, cfg.POOL_SIZE), **kwargs):
         super(PyramidROIAlign_AFP, self).__init__(**kwargs)
         self.pool_shape = tuple(pool_shape)
 
@@ -259,10 +250,15 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
 #        box_to_level = []
         for i, level in enumerate(range(2, 6)):
 
-            box_indices = tf.range(tf.keras.backend.shape(boxes)[0])
-            box_indices = tf.keras.backend.repeat_elements(box_indices, tf.keras.backend.int_shape(boxes)[1], axis=0)
+            box_indices = tf.range(tf.shape(boxes)[0])
+            
+            box_indices = tf.reshape(box_indices, [-1, 1])    
+            box_indices = tf.tile(box_indices, [1, tf.shape(boxes)[1]])  
+            box_indices = tf.reshape(box_indices, [-1]) 
+#            box_indices = tf.keras.backend.repeat_elements(box_indices, tf.keras.backend.int_shape(boxes)[1], axis=0)
+            
+            level_boxes = tf.reshape(boxes, (-1, 4))
 
-            level_boxes = tf.keras.backend.reshape(boxes, (-1, 4))
             # Stop gradient propogation to ROI proposals
             level_boxes = tf.stop_gradient(level_boxes)
             box_indices = tf.stop_gradient(box_indices)
@@ -290,13 +286,11 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
         return pooled
 
     def get_input_shape(self):
-        return tf.zeros((cfg.BATCH, cfg.MAX_PROP, 4)),  [tf.zeros(shape=(cfg.BATCH, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], 
-                                        cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
+        return tf.zeros((cfg.BATCH, cfg.MAX_PROP, 4)),  [tf.zeros(shape=(cfg.BATCH, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
     
     def get_output_shape(self):
-        return [out.shape for out in self.call(self.get_input_boxes_shape(), self.get_input_features_shape())]
+        return [out.shape for out in self.call(self.get_input_shape())]
 
-        
 #class PyramidROIAlign(tf.keras.layers.Layer):
 #    """Implements ROI Pooling on multiple levels of the feature pyramid.
 #    Params:
