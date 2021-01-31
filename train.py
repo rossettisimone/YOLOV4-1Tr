@@ -45,6 +45,7 @@ model.summary()
 #model.trainable = False # too fucking important for inferring
 model.fit()
 
+
 #import time
 #avg = 0
 #start = time.time()
