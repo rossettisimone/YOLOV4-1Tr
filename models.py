@@ -7,7 +7,7 @@ import config as cfg
 from backbone import cspdarknet53
 from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode,CustomProposalLayer, PyramidROIAlign_AFP
 import gc
-from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss
+from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss, decode_delta, xyxy2xywh, xywh2xyxy, show_image
 from datetime import datetime
 
 class fpn(tf.keras.Model):
@@ -247,6 +247,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             alb_loss = mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss
         return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss
    
+    @tf.function
     def test_step(self, data):
         training = False
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
@@ -276,26 +277,26 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
             self.adapt_lr()
-            self.set_trainable(True)
+            self.set_trainable(trainable = True, include_backbone = False)
             for data in self.train_ds.take(self.steps_train * self.batch).batch(self.batch):
                 self.step_train += 1
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
-            gc.collect()
-            self.set_trainable(False, True)
+            self.set_trainable(trainable = False, include_backbone = True)
             mean_loss = []
+            gc.collect()
             for data in self.val_ds.take(self.steps_val * self.batch).batch(self.batch):
                 self.step_val += 1
                 losses = self.test_step(data) 
                 mean_loss.append(losses[0])
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
-            gc.collect()
             path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
+            gc.collect()
     
-    @tf.function
+#    @tf.function
     def infer(self, image):
         training = True
         if self.mask:
@@ -308,16 +309,26 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         nB = tf.shape(image)[0]
         for i in range(nB):
             proposal = proposals[i]
+            bbox = bboxes[i]
+            mask = masks[i]
             if tf.greater(tf.reduce_sum(proposal),0.0):
                 valid = tf.reduce_sum(tf.cast(tf.greater(tf.reduce_sum(proposals, axis=-1),0.0),tf.int32))
-                proposal = proposal[:valid,:]           
-                bboxs = proposal[...,:4]*cfg.TRAIN_SIZE
-                confs = proposal[...,4] 
+                pr = proposal[:valid,:4]
+                pr = xyxy2xywh(pr)#tf.constant([0.125,0.05,0.0,0.0])#*cfg.TRAIN_SIZE
+                bb = bbox[:valid,1,:4]
+                bb = decode_delta(bb, pr)
+                bb = xywh2xyxy(bb)
+                bb = tf.clip_by_value(bb,0.0,1.0)
+                bb = tf.round(bb*cfg.TRAIN_SIZE)
+                confs = proposal[:valid,4] 
+                mask = mask[:valid,:,:,1]
                 tf.print('Found')
+                prop = proposal[:valid,:4]*cfg.TRAIN_SIZE
                 # Final proposals are obtained in dets. Information of bounding box and embeddings also included
-                # draw_bbox(image[i], bboxs, confs)
+                draw_bbox(image[i], prop, bb, mask, confs)
             else:
                 tf.print('None')
+                show_image(tf.cast(image*255,tf.uint8).numpy()[i])
     
     def print_loss(self, losses, training=True):
         if training:
@@ -383,10 +394,15 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                         tf.summary.histogram('output', preactivate, step=step)
         self.writer.flush()
         
-    def set_trainable(self, trainable = True, backbone = False):
-        start = 0 if backbone else 1
+    def set_trainable(self, trainable = True, include_backbone = False):
+        start = 0 if include_backbone else 1
         for net in self.layers[start:]:
             net.trainable = trainable
+        self.s_c._trainable = trainable
+        self.s_r._trainable = trainable
+        self.s_mc._trainable = trainable
+        self.s_mr._trainable = trainable
+        self.s_mm._trainable = trainable
             
     def freeze_batch_normalization(self):
         for net in self.layers:

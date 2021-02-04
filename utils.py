@@ -8,11 +8,12 @@ Created on Tue Dec 22 18:40:02 2020
 
 
 import json
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageColor
 import numpy as np
 import config as cfg
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import random
 
 def file_reader(file_name):
     with open(file_name) as json_file:
@@ -109,17 +110,33 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
 
 # TODO      
-def draw_bbox(image, bboxs, conf_id=None):
+def draw_bbox(image, prop, bboxs, masks, conf_id=None):
+    colors = []
+    for name, code in ImageColor.colormap.items():
+         colors.append(name)
+    random.shuffle(colors)
     img = Image.fromarray(np.array(image.numpy()*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   
     if conf_id == None:
         conf_id = tf.zeros_like(bboxs)[...,0]
-    for bbox,conf in zip(bboxs.numpy(), conf_id.numpy()):
-        draw.rectangle(bbox, outline ="red") 
+    for i,(pro,bbox,conf) in enumerate(zip(prop.numpy(), bboxs.numpy(), conf_id.numpy())):
+        draw.rectangle(pro, outline = "red") 
+        draw.rectangle(bbox, outline = colors[i%len(colors)]) 
         xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
-        draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"))
+        draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"), fontsize = 15, fill=colors[i%len(colors)])
+    img = np.array(img)
+    for i, (mask, bbox) in enumerate(zip(masks.numpy(), bboxs.numpy())):
+        mask = Image.fromarray(mask)
+        xyxy = np.array(bbox,dtype=np.int32)
+        wh = np.array(bbox[2:]-bbox[:2],dtype=np.int32)
+        mask = np.round(mask.resize((wh[0], wh[1]),Image.ANTIALIAS))
+        mask = np.array(Image.new('RGB', (wh[0], wh[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
+        img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]] = img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]]*0.5+mask*0.5
+    show_image(img)
+
+def show_image(img):
+    img = Image.fromarray(img)               
     img.show()
-    
 #
 def xyxy2xywh(xyxy):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
@@ -189,7 +206,7 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
 
 
 
-#def remove_unconsistent_deltas(deltas):
+#def true_proposals_deltas(deltas):
 #    condition = tf.logical_and(tf.greater(proposals[...,3],proposals[...,1]),tf.greater(proposals[...,2],proposals[...,0]))
 #    valid_indices = tf.squeeze(tf.where(condition),axis=-1)
 #    proposals = tf.gather(proposals,valid_indices)
@@ -207,6 +224,12 @@ def generate_anchor(nGh, nGw, anchor_wh):
 
 #
 def encode_delta(gt_box_list, fg_anchor_list):
+    '''
+    :param: gt_box_list, shape (num_boxes, (gx, gy, gw, gh))
+    :param: fg_anchor_list, shape (nA, nGh, nGw, (px, py, pw, ph))
+    
+    :output: nA, nGh, nGw, (dx, dy, dw, dh) (log)
+    '''
     px, py, pw, ph = fg_anchor_list[:, 0], fg_anchor_list[:,1], \
                      fg_anchor_list[:, 2], fg_anchor_list[:,3]
     gx, gy, gw, gh = gt_box_list[:, 0], gt_box_list[:, 1], \
@@ -219,6 +242,12 @@ def encode_delta(gt_box_list, fg_anchor_list):
 
 
 def decode_delta(delta, fg_anchor_list):
+    '''
+    :param: delta, shape (total_anchors, (dx, dy, dw, dh)) (log)
+    :param: fg_anchor_list, shape (total_anchors, (px, py, pw, ph))
+    
+    :output: total_anchors, (gx, gy, gw, gh)
+    '''
     px, py, pw, ph = fg_anchor_list[:, 0], fg_anchor_list[:,1], \
                      fg_anchor_list[:, 2], fg_anchor_list[:,3]
     dx, dy, dw, dh = delta[:, 0], delta[:, 1], delta[:, 2], delta[:, 3]
@@ -245,50 +274,40 @@ def decode_delta_map(delta_map, anchors):
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
 
-        
-
-def suppress_and_order_proposals_by_score(proposal):
+def conf_proposals(proposal):
     indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
     proposal = tf.gather(proposal,indices)
+
+    padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
+    proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
+    
     indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING')[:cfg.MAX_PROP]
     proposal = tf.gather(proposal,indices)
+    
     padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0) # needed if cfg.MAX_PROP is high value
-    top_proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
-#    if tf.greater(padding,0):
-#        mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(top_proposal[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
-#        top_proposal = entry_stop_gradients(top_proposal, mask_non_zero_entry)
-    return top_proposal
+    proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
+#    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposal[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
+#    proposal = entry_stop_gradients(proposal, mask_non_zero_entry)
+    return proposal
 
 
-def nms_proposals(proposal_):
-    proposal = remove_unconsistent(proposal_) # remove bboxes with unconsistent dimensions (zero padded but also ones with x1>x2 and y1>y2)
-#    indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
-#    proposal = tf.gather(proposal,indices) # remove zeros (speed non max suppress)
-#    tf.print(tf.greater(tf.shape(proposal)[0],0))
-#    tf.print(tf.greater(tf.size(proposal),0))
-#    tf.print(len(proposal)>0)
-    if tf.greater(tf.shape(proposal)[0],0): 
-        indices = tf.image.non_max_suppression(
-                             proposal[...,:4], proposal[...,4], max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,
-                            score_threshold=cfg.CONF_THRESH
-                        )
-        proposal = tf.gather(proposal, indices) #b x n rois x (4+1+1+208)
-        padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-        nms_proposals = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
-#        if tf.greater(padding,0):
-#            mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(nms_proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
-#            nms_proposals = entry_stop_gradients(nms_proposals, mask_non_zero_entry)
-    else:
-        nms_proposals = tf.stop_gradient(tf.zeros((cfg.MAX_PROP,tf.shape(proposal_)[-1]),dtype=tf.float32)) # stop gradient, if not it will return nan in backpropagation 
-    return nms_proposals
+def nms_proposals(proposal):
+    # remove unconsistent bboxes; x2>x1 and y2>y1
+    indices = tf.squeeze(tf.where(tf.logical_and(tf.greater(proposal[...,3], \
+                        proposal[...,1]),tf.greater(proposal[...,2],proposal[...,0]))),axis=-1)
+    proposal = tf.gather(proposal,indices)
 
-
-def remove_unconsistent(proposals):
-    condition = tf.logical_and(tf.greater(proposals[...,3],proposals[...,1]),tf.greater(proposals[...,2],proposals[...,0]))
-    valid_indices = tf.squeeze(tf.where(condition),axis=-1)
-    proposals = tf.gather(proposals,valid_indices)
-    return proposals
-
+    padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
+    proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
+    # non max suppression
+    indices = tf.image.non_max_suppression(proposal[...,:4], proposal[...,4], max_output_size=cfg.MAX_PROP, 
+                         iou_threshold=cfg.NMS_THRESH, score_threshold=cfg.CONF_THRESH)
+    proposal = tf.gather(proposal, indices) #b x n rois x (4+1+1+208)
+    
+    padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
+    proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
+        
+    return proposal
 
 def preprocess_target_bbox(proposal_gt_bbox):
     """ proposal: [num_rois, (x, y, w, h)] 
@@ -299,10 +318,10 @@ def preprocess_target_bbox(proposal_gt_bbox):
     valid_proposals = tf.gather(proposal, valid_indices, axis=0)
     assigned_gt_bboxes = tf.gather(gt_bbox,gt_indices,axis=0)
     valid_gt_bboxes = tf.gather(assigned_gt_bboxes,valid_indices, axis=0)
-    encoded_gt_bboxes = encode_delta(valid_gt_bboxes, valid_proposals)
+    encoded_delta = encode_delta(valid_gt_bboxes, valid_proposals)
     non_valid_indices = tf.squeeze(tf.where(tf.logical_not(non_zero_proposals)),axis=-1)
     non_valid_gt_bboxes = tf.gather(proposal,non_valid_indices)
-    target_bbox = tf.concat([encoded_gt_bboxes, non_valid_gt_bboxes], axis=0)
+    target_bbox = tf.concat([encoded_delta, non_valid_gt_bboxes], axis=0)
 
     return target_bbox
 
@@ -346,6 +365,9 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
 #    gt_bboxes_2 = tf.random.uniform((2,5,2))*0.5 + 0.5
 #    gt_bboxes = tf.concat([gt_bboxes_1, gt_bboxes_2], axis=-1)* cfg.TRAIN_SIZE
 #    gt_masks = tf.round(tf.random.uniform((2,5,28,28)))
+#    proposals = tf.zeros((2,20,4))
+#    gt_bboxes = tf.zeros((2,10,4))
+#    gt_masks = tf.zeros((2,10,28,28))
     gt_bboxes = gt_bboxes[...,:4]
     gt_bboxes /= cfg.TRAIN_SIZE
     gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
@@ -361,9 +383,13 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     target_class_ids = tf.stop_gradient(target_class_ids)
     target_bbox = tf.stop_gradient(target_bbox)
     target_masks = tf.stop_gradient(target_masks)
-    #decode_delta(encoded_gt_bboxes, valid_proposals)
+#    pred_class_logits = -tf.stack([tf.concat([-tf.ones((2,10)),-tf.ones((2,10))],axis=-1),tf.concat([tf.ones((2,10)),tf.ones((2,10))],axis=-1)],axis=-1)*10
+#    pred_bbox = tf.tile(target_bbox[:,:,None,:],(1,1,2,1))
+#    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,2))
+#    active_class_ids = tf.stop_gradient(active_class_ids)
+    #decode_delta(encoded_delta, valid_proposals)
 
-    return target_class_ids, target_bbox, target_masks
+    return target_class_ids, target_bbox, target_masks #, active_class_ids
 
 
 def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
@@ -376,30 +402,29 @@ def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
         for classes that are not in the dataset.
         active_class_ids = tf.concat([tf.zeros((nB,1)),tf.ones((nB,1))],axis=-1)
     """
+
     # During model building, Keras calls this function with
     # target_class_ids of type float32. Unclear why. Cast it
     # to int to get around it.
-    target_class_ids = tf.cast(target_class_ids, 'int32')
+#    target_class_ids = tf.cast(target_class_ids, 'int32')
+
     # Find predictions of classes that are not in the dataset.
-    #pred_class_ids = tf.argmax(pred_class_logits, axis=2)
+#    pred_class_ids = tf.argmax(pred_class_logits, axis=2)
     # TODO: Update this line to work with batch > 1. Right now it assumes all
     #       images in a batch have the same active_class_ids
-    #pred_active = tf.gather(active_class_ids[0], pred_class_ids)
+    
+#    pred_active = tf.gather(active_class_ids[0], pred_class_ids)
 
     # # Loss
-    # pred_class_logits = tf.math.l2_normalize(pred_class_logits,axis=-1, epsilon=1e-12) #?
-    
-    if tf.reduce_sum(target_class_ids)>0:
-        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
-    else:
-        loss = tf.constant(0.0)
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        labels=target_class_ids, logits=pred_class_logits)
+
     # Erase losses of predictions of classes that are not in the active
     # classes of the image.
-#        loss = loss #* pred_active
+#    loss = loss * pred_active
 
     # Computer loss mean. Use only predictions that contribute
     # to the loss to get a correct mean.
-#    loss = tf.reduce_sum(loss) / tf.reduce_sum(pred_active)
     loss = tf.reduce_mean(loss) #/ tf.reduce_sum(pred_active)
     return loss
 
@@ -440,9 +465,6 @@ def mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox):
         loss = smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox)
     else:
         loss = tf.constant(0.0)
-#        loss = tf.keras.backend.switch(tf.size(target_bbox) > 0,
-#                        self.smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox),
-#                        tf.constant(0.0))
     loss = tf.reduce_mean(loss)
     return loss
 
@@ -479,12 +501,10 @@ def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     # Compute binary cross entropy. If no positive ROIs, then return 0.
     # shape: [batch, roi, num_classes]
     if tf.size(y_true) > 0:
-        loss =tf.keras.losses.BinaryCrossentropy()(y_true, y_pred)
+        loss =tf.keras.losses.binary_crossentropy(y_true, y_pred)
     else:
         loss = tf.constant(0.0)
-#        loss = tf.keras.backend.switch(tf.size(y_true) > 0,
-#                        tf.keras.backend.binary_crossentropy(target=y_true, output=y_pred),
-#                        tf.constant(0.0))
+
     loss = tf.reduce_mean(loss)
     return loss
 

@@ -102,7 +102,7 @@ class Generator(object):
                 xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
                 box=np.array([min(xx),min(yy),max(xx),max(yy)])
             if not np.all(box==0) and box[2]>box[0] and box[3]>box[1]:
-                box = np.r_[box,1]*np.array([width, height, width, height, person['p_id_2']])
+                box = np.r_[box,1]*np.array([width, height, width, height, person['p_id']])
                 
                 try:
                      mask = mask_clamp(np.array(read_image(os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' ))))

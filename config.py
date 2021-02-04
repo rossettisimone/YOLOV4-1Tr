@@ -12,7 +12,7 @@ ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/datase
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 6
+BATCH = 2
 TRAIN_SIZE = 416#416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
@@ -25,10 +25,17 @@ BG_THRESH = 0.3
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20 #150
-ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
-           27,  82,  57, 165, 102, 209, 181, 235,
-           41, 124,  86, 248, 154, 313, 272, 353,
-           55, 165, 114, 331, 205, 418, 363, 470]
+ANCHORS = [4,12, 6,22, 8,37, 11,20, 
+           24,96, 29,64, 33,109, 38,85, 
+           91,227, 96,124, 111,182, 123,239, 
+           293,403, 333,488, 396,412, 438, 491]
+#[ 13,  41,  28,  82,  51, 104,  90, 117, 
+#           27,  82,  57, 165, 102, 209, 181, 235,
+#           41, 124,  86, 248, 154, 313, 272, 353,
+#           55, 165, 114, 331, 205, 418, 363, 470]
+
+
+
 #[ 13,  41,  28,  82,  51, 104,  90, 117,  27,  82,  57, 165, 102,
 #       209, 181, 235,  41, 124,  86, 248, 154, 313, 272, 353,  55, 165,
 #       114, 331, 205, 418, 363, 470]
@@ -45,8 +52,8 @@ ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117,
 #       586]#[4,6, 5,7, 8,18, 9,19,  8,24, 11,34, 16,48, 23,68,  32,96, 45,135, 64,192, 90,271,  128,384, 180,540, 256,640, 512,640 ]#[8,24, 11,34, 16,48,  23,68,32,96, 45,135,  64,192, 90,271,128,384,  180,540, 256,640, 512,640 ]#[5,4, 12,7, 11,15, 12,16, 19,36, 40,28, 36,75, 76,55, 72,146, 142,110, 192,243, 459,401]
 ##
 NUM_ANCHORS = 4
-BBOX_CLASS=4
-BBOX_REG=1
+BBOX_CLASS = 4
+BBOX_REG = 1
 MASK=0
 STRIDES = [ 4, 8, 16, 32] #2
 #ANCHORS =  [  7,   7,  14,  28,  28, 21,  35,  56, 
@@ -57,19 +64,19 @@ STRIDES = [ 4, 8, 16, 32] #2
 LEVELS = 4 #5
 EMB_DIM = 208
 CSP_DARKNET53 = './weights/yolov4.weights'
-MSDS_WEIGHTS = './tracker_weights_10.tf'
+MSDS_WEIGHTS = './MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf'
 # Train
 WD = 1e-4
-LR = 1e-2
+LR = 1e-3
 MOM = 0.9
 EPOCHS = 30
 
-CONF_THRESH = 0.5
+CONF_THRESH = 0.7
 NMS_THRESH = 0.3
-STEPS_PER_EPOCH_TRAIN = 5000
-STEPS_PER_EPOCH_VAL = 500
+STEPS_PER_EPOCH_TRAIN = 1000
+STEPS_PER_EPOCH_VAL = 50
 
-MAX_PROP = 20
+MAX_PROP = 100
 
 POOL_SIZE = 7
 MASK_POOL_SIZE = 14

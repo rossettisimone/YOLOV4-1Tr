@@ -32,7 +32,7 @@ from loader import DataLoader
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/logdir --port 6006
 # scp /home/fiorapirri/Documents/workspace/tracker4/weights/yolov4.weights alcor@Alcor:/media/data4/Models/simenv/tracker/weights/yolov4.weights
 
-ds = DataLoader(shuffle=True, data_aug=True)
+ds = DataLoader(shuffle=True, data_aug=False)
 #with mirrored_strategy.scope():
 model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()
@@ -41,7 +41,7 @@ model.custom_build()
 #model.neck.summary()
 #model.head.summary()
 model.summary()
-#model.load('./weights/MSDS_noemb_nomask_20_-5.56_2021-01-26-11-09-44.tf')
+#model.load('./weights/MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf')
 #model.trainable = False # too fucking important for inferring
 model.fit()
 
@@ -83,9 +83,16 @@ model.fit()
 #fps = 0
 #i=0
 #with options({'constant_folding': True}):
-#    for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.train_ds.take(300).batch(1):
+#for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.train_ds.take(4).batch(1):
+#        print(gt_bboxes[tf.reduce_sum(gt_bboxes,axis=-1)>0])
+#        plt.imshow(image[0])
+#        plt.show()
+#        plt.imshow(gt_masks[0,0])
+#        plt.show()
+#        plt.imshow(gt_masks[0,1])
+#        plt.show()
 #        t0=time.time()
-#        model.infer(image)
+#    model.infer(image)
 #        i+=1
 #        fps+=1/(time.time()-t0)
 #        print(fps/i)
