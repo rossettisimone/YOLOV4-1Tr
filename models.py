@@ -88,6 +88,8 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             self.batch = cfg.BATCH
             self.steps_train = cfg.STEPS_PER_EPOCH_TRAIN
             self.steps_val = cfg.STEPS_PER_EPOCH_VAL
+            self.folder = "{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            self.writer = tf.summary.create_file_writer("./{}/logdir".format(self.folder))
         self.freeze_bkbn = freeze_bkbn
         self.freeze_bn = freeze_bn
         self.LEVELS = cfg.LEVELS
@@ -95,7 +97,6 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[self.LEVELS, self.NUM_ANCHORS, 2])
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.emb_dim = cfg.EMB_DIM 
-        self.writer = tf.summary.create_file_writer(cfg.SUMMARY_LOGDIR)
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
 #        self.SmoothL1Loss = tf.keras.losses.Huber(delta=1.0)
 #        self.SoftmaxLoss = SoftmaxLoss()
@@ -275,15 +276,15 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.bkbn.trainable = True
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
-            self.adapt_lr()
-            self.set_trainable(True)
+            # self.adapt_lr()
+            self.set_trainable(trainable = True, include_backbone = False)
             for data in self.train_ds.take(self.steps_train * self.batch).batch(self.batch):
                 self.step_train += 1
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
             gc.collect()
-            self.set_trainable(False, True)
+            self.set_trainable(trainable = False, include_backbone = True)
             mean_loss = []
             for data in self.val_ds.take(self.steps_val * self.batch).batch(self.batch):
                 self.step_val += 1
@@ -292,7 +293,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
             gc.collect()
-            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
     
     @tf.function
@@ -383,10 +384,15 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                         tf.summary.histogram('output', preactivate, step=step)
         self.writer.flush()
         
-    def set_trainable(self, trainable = True, backbone = False):
-        start = 0 if backbone else 1
+    def set_trainable(self, trainable, include_backbone):
+        start = 0 if include_backbone else 1
         for net in self.layers[start:]:
             net.trainable = trainable
+        self.s_c._trainable = trainable
+        self.s_r._trainable = trainable
+        self.s_mc._trainable = trainable
+        self.s_mr._trainable = trainable
+        self.s_mm._trainable = trainable
             
     def freeze_batch_normalization(self):
         for net in self.layers:

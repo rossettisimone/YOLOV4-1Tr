@@ -128,13 +128,13 @@ def main():
     global output_dir
     global num_clusters
     
-    width_in_cfg_file = 512.
-    height_in_cfg_file = 512.
+    width_in_cfg_file = 416.
+    height_in_cfg_file = 416.
     levels = 4
-    base = 5
+    base = 4
     scales = [base*2**i for i in range(levels)]
     output_dir = './info'
-    num_clusters = 5
+    num_clusters = 4
     
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)

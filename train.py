@@ -30,21 +30,34 @@ from models import MSDS
 
 from loader import DataLoader 
 
-# tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/logdir --port 6006
+# tensorboard --logdir /media/data4/Models/simenv/tracker/logdir --port 6006
 # scp /home/fiorapirri/Documents/workspace/tracker4/weights/yolov4.weights alcor@Alcor:/media/data4/Models/simenv/tracker/weights/yolov4.weights
 
-ds = DataLoader(shuffle=True, data_aug=True)
-#with mirrored_strategy.scope():
-model = MSDS(data_loader = ds, emb = False, mask = True)
-model.custom_build()
-#model.plot()
-#model.bkbn.model.summary() 
-#model.neck.summary()
-#model.head.summary()
-model.summary()
-#model.load('./weights/MSDS_noemb_nomask_20_-5.56_2021-01-26-11-09-44.tf')
-#model.trainable = False # too fucking important for inferring
-model.fit()
+import contextlib
+
+@contextlib.contextmanager
+def options(options):
+	old_opts = tf.config.optimizer.get_experimental_options()
+	tf.config.optimizer.set_experimental_options(options)
+	try:
+		yield
+	finally:
+		tf.config.optimizer.set_experimental_options(old_opts)
+
+with options({'constant_folding': True}):
+	ds = DataLoader(shuffle=True, data_aug=True)
+	#with mirrored_strategy.scope():
+	model = MSDS(data_loader = ds, emb = False, mask = True)
+	model.custom_build()
+	#model.plot()
+	#model.bkbn.model.summary() 
+	#model.neck.summary()
+	#model.head.summary()
+	model.summary()
+	#model.load('./weights/MSDS_noemb_nomask_20_-5.56_2021-01-26-11-09-44.tf')
+	#model.trainable = False # too fucking important for inferring
+	model.fit()
+
 
 #/home/fiorapirri/.local/lib/python3.8/site-packages/tensorflow/python/framework/indexed_slices.py:435: UserWarning: Converting sparse IndexedSlices(IndexedSlices(indices=Tensor("gradient_tape/MSDS/proposal_layer/while_4/gradients/MSDS/proposal_layer/while_4/GatherV2_grad/Reshape_1:0", shape=(None,), dtype=int64), values=Tensor("gradient_tape/MSDS/proposal_layer/while_4/gradients/MSDS/proposal_layer/while_4/GatherV2_grad/Reshape:0", shape=(None, None), dtype=float32), dense_shape=Tensor("gradient_tape/MSDS/proposal_layer/while_4/gradients/MSDS/proposal_layer/while_4/GatherV2_grad/Cast:0", shape=(2,), dtype=int32))) to a dense Tensor of unknown shape. This may consume a large amount of memory.
 #  warnings.warn(

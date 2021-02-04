@@ -389,10 +389,10 @@ def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
     # # Loss
     # pred_class_logits = tf.math.l2_normalize(pred_class_logits,axis=-1, epsilon=1e-12) #?
     
-    if tf.reduce_sum(target_class_ids)>0:
-        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
-    else:
-        loss = tf.constant(0.0)
+    # if tf.reduce_sum(target_class_ids)>0:
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits)
+    # else:
+    #     loss = tf.constant(0.0)
     # Erase losses of predictions of classes that are not in the active
     # classes of the image.
 #        loss = loss #* pred_active

@@ -2,7 +2,7 @@
 # VIDEOS_DATASET_PATH = "/home/temir/Documents/AVA/Dataset/Kin200/"
 # ANNOTATION_PATH = "/home/temir/Documents/AVA/Dataset/prova.json"
 #import numpy as np
-GPU = '1'
+GPU = '3'
 DATASET_TYPE = 'ava'
 
 # AVA_path 
@@ -12,8 +12,8 @@ ANNOTATION_PATH = "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 6
-TRAIN_SIZE = 416#416
+BATCH = 8
+TRAIN_SIZE = 416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
 
@@ -25,10 +25,14 @@ BG_THRESH = 0.3
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20 #150
-ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
-           27,  82,  57, 165, 102, 209, 181, 235,
-           41, 124,  86, 248, 154, 313, 272, 353,
-           55, 165, 114, 331, 205, 418, 363, 470]
+ANCHORS = [4,12, 6,22, 8,37, 11,20, 
+           24,96, 29,64, 33,109, 38,85, 
+           91,227, 96,124, 111,182, 123,239, 
+           293,403, 333,488, 396,412, 438, 491]
+# [ 13,  41,  28,  82,  51, 104,  90, 117, 
+#            27,  82,  57, 165, 102, 209, 181, 235,
+#            41, 124,  86, 248, 154, 313, 272, 353,
+#            55, 165, 114, 331, 205, 418, 363, 470]
 #[ 13,  41,  28,  82,  51, 104,  90, 117,  27,  82,  57, 165, 102,
 #       209, 181, 235,  41, 124,  86, 248, 154, 313, 272, 353,  55, 165,
 #       114, 331, 205, 418, 363, 470]
@@ -59,14 +63,14 @@ EMB_DIM = 208
 CSP_DARKNET53 = './weights/yolov4.weights'
 # Train
 WD = 1e-4
-LR = 1e-2
+LR = 1e-3 #1e-2
 MOM = 0.9
 EPOCHS = 30
 
-CONF_THRESH = 0.5
-NMS_THRESH = 0.3
-STEPS_PER_EPOCH_TRAIN = 5000
-STEPS_PER_EPOCH_VAL = 500
+CONF_THRESH = 0.8
+NMS_THRESH = 0.5
+STEPS_PER_EPOCH_TRAIN = 1000
+STEPS_PER_EPOCH_VAL = 50
 
 MAX_PROP = 100
 
