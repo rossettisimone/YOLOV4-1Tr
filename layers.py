@@ -7,7 +7,7 @@ Created on Mon Dec 21 18:37:18 2020
 """
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, suppress_and_order_proposals_by_score
+from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, conf_proposals
 
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
@@ -167,6 +167,7 @@ class CustomProposalLayer(tf.keras.layers.Layer):
 
     def call(self, predictions, embeddings = None):
         """ predictions: b x 4 x h x w x 6; embeddings: b x h x w x emb (=208) """
+        """ proposals: b x MAX_PROP x (4+1+emb) where bb is in xyxy form"""
         proposals = []
         for i in range(cfg.LEVELS):
             pred = predictions[i]
@@ -176,6 +177,8 @@ class CustomProposalLayer(tf.keras.layers.Layer):
             pbox = decode_delta_map(pbox, self.ANCHORS[i]/self.STRIDES[i])
             pbox *= self.STRIDES[i] # now in range [0, .... cfg.TRAIN_SIZE]
             pbox /= self.TRAIN_SIZE #now normalized in [0...1]
+            pbox = xywh2xyxy(pbox) # to bbox
+            pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
             preds = tf.concat([pbox, pconf], axis=-1)
             
             if embeddings:
@@ -184,14 +187,12 @@ class CustomProposalLayer(tf.keras.layers.Layer):
                 preds = tf.concat([preds, pemb], axis=-1)     
                 
             proposal = tf.reshape(preds, [tf.shape(preds)[0], -1, tf.shape(preds)[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
-            proposal = tf.map_fn(suppress_and_order_proposals_by_score, proposal, fn_output_signature=tf.float32)
+            proposal = tf.map_fn(conf_proposals, proposal, fn_output_signature=tf.float32)
             proposals.append(proposal)
             
         proposals = tf.concat(proposals,axis=1) #concat along levels
-        boxes = xywh2xyxy(proposals[...,:4]) # to bbox
-        boxes = tf.clip_by_value(boxes,0.0,1.0)
-        proposals = tf.concat([boxes,proposals[...,4:]],axis=-1) 
         proposals = tf.map_fn(nms_proposals, proposals, fn_output_signature=tf.float32)
+        
         mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
         proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
         return proposals
