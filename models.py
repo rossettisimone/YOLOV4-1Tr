@@ -98,9 +98,6 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.emb_dim = cfg.EMB_DIM 
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
-#        self.SmoothL1Loss = tf.keras.losses.Huber(delta=1.0)
-#        self.SoftmaxLoss = SoftmaxLoss()
-#        self.CrossEntropyLossLogits = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)#
 #        self.strategy = tf.distribute.MirroredStrategy()
 
@@ -293,7 +290,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 mean_loss.append(losses[0])
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
-            path = "./weights/{}_{}_{}_{}_{}_{}.tf".format(self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
             gc.collect()
     
