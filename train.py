@@ -7,7 +7,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
 import tensorflow as tf
 #tf.get_logger().setLevel('WARNING')
 tf.compat.v1.reset_default_graph()
-#tf.debugging.enable_check_numerics()
+tf.debugging.enable_check_numerics()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
@@ -32,7 +32,7 @@ from loader import DataLoader
 # tensorboard --logdir /home/fiorapirri/Documents/workspace/tracker/logdir --port 6006
 # scp /home/fiorapirri/Documents/workspace/tracker4/weights/yolov4.weights alcor@Alcor:/media/data4/Models/simenv/tracker/weights/yolov4.weights
 
-ds = DataLoader(shuffle=True, data_aug=False)
+ds = DataLoader(shuffle=True, data_aug=True)
 #with mirrored_strategy.scope():
 model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()
