@@ -3,12 +3,19 @@
 # ANNOTATION_PATH = "/home/temir/Documents/AVA/Dataset/prova.json"
 #import numpy as np
 GPU = '3'
-DATASET_TYPE = 'ava'
+# DATASET_TYPE = 'ava'
 
-# AVA_path 
-VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
+# AVA META PATHS
+VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames/"
 SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/masks/"
-ANNOTATION_PATH = "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json" # #ava_frames_boundings_train_v2.2.json
+
+# AVA JSON PATHS
+TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json","/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json"] # #ava_frames_boundings_train_v2.2.json
+# TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"] # #ava_frames_boundings_train_v2.2.json
+VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+
+MIN_BOX_DIM = 0.15
+MIN_BOX_RATIO = 0.2
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
@@ -24,7 +31,7 @@ BG_THRESH = 0.3
 # Network
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
-MAX_BBOX_PER_SCALE = 20 #150
+MAX_BBOX_PER_SCALE = 20
 ANCHORS = [4,12, 6,22, 8,37, 11,20, 
            24,96, 29,64, 33,109, 38,85, 
            91,227, 96,124, 111,182, 123,239, 
@@ -55,13 +62,13 @@ NUM_ANCHORS = 4
 BBOX_CLASS = 4
 BBOX_REG = 1
 MASK=0
-STRIDES = [ 4, 8, 16, 32] #2
+STRIDES = [ 4, 8, 16, 32]
 #ANCHORS =  [  7,   7,  14,  28,  28, 21,  35,  56, 
 #            13,  13,  26,  52,  52,  39,  65, 104, 
 #            26,  26,  52, 104, 104,  78, 130, 208, 
 #            52,  52, 104, 208, 208, 156, 260, 416] #1,   1,   2,   4,   4,   3,   5,   8,
 #XYSCALE= [1.4, 1.3, 1.2, 1.1, 1.05]
-LEVELS = 4 #5
+LEVELS = 4
 EMB_DIM = 208
 CSP_DARKNET53 = './weights/yolov4.weights'
 MSDS_WEIGHTS = './MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf'
@@ -69,12 +76,13 @@ MSDS_WEIGHTS = './MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf'
 WD = 1e-4
 LR = 1e-3
 MOM = 0.9
-EPOCHS = 30
+GRADIENT_CLIP = 1.0
+EPOCHS = 40
 
 CONF_THRESH = 0.7
 NMS_THRESH = 0.3
-STEPS_PER_EPOCH_TRAIN = 1000
-STEPS_PER_EPOCH_VAL = 50
+STEPS_PER_EPOCH_TRAIN = 2000
+STEPS_PER_EPOCH_VAL = 100
 
 MAX_PROP = 40
 

@@ -78,13 +78,11 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.emb = emb
         if data_loader is not None:
             self.ds = data_loader
-            self.train_ds = self.ds.train_ds
-            self.val_ds = self.ds.val_ds
             self.nID =  self.ds.nID
             self.epochs = cfg.EPOCHS
-            self.epoch = 0
-            self.step_train = 0
-            self.step_val = 0
+            self.epoch = 1
+            self.step_train = 1
+            self.step_val = 1
             self.batch = cfg.BATCH
             self.steps_train = cfg.STEPS_PER_EPOCH_TRAIN
             self.steps_val = cfg.STEPS_PER_EPOCH_VAL
@@ -98,7 +96,8 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.emb_dim = cfg.EMB_DIM 
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
-        self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)#
+        self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)
+        self.optimizer.clipvalue = cfg.GRADIENT_CLIP
 #        self.strategy = tf.distribute.MirroredStrategy()
 
         #CSPDARKNET53 
@@ -266,8 +265,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         if epochs is not None:
             self.epochs = epochs
         self.start_epoch = start_epoch
-        for epoch in range(self.epochs):
-            self.epoch += 1
+        train_generator = self.ds.train_ds.repeat().batch(self.batch).__iter__()
+        val_generator = self.ds.val_ds.repeat().batch(self.batch).__iter__()
+        while self.epoch < self.epochs:
             if self.freeze_bkbn and self.epoch < 2:
                 self.bkbn.trainable = False
             else:
@@ -276,23 +276,26 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.freeze_batch_normalization() 
             # self.adapt_lr()
             self.set_trainable(trainable = True, include_backbone = False)
-            for data in self.train_ds.take(self.steps_train * self.batch).batch(self.batch):
-                self.step_train += 1
+            while self.step_train < self.epoch * self.steps_train :
+                data = train_generator.next()
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
+                self.step_train += 1
             self.set_trainable(trainable = False, include_backbone = True)
-            gc.collect()
             mean_loss = []
-            for data in self.val_ds.take(self.steps_val * self.batch).batch(self.batch):
-                self.step_val += 1
+            gc.collect()
+            while self.step_val < self.epoch * self.steps_val :
+                data = val_generator.next()
                 losses = self.test_step(data) 
                 mean_loss.append(losses[0])
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
+                self.step_val += 1
             path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
             gc.collect()
+            self.epoch += 1
     
 #    @tf.function
     def infer(self, image):
