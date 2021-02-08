@@ -10,3 +10,5 @@ config.py
 /weights*
 /weights_old
 weights_old/
+/2021*
+2021*
