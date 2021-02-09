@@ -46,6 +46,8 @@ class Generator(object):
         return inputs
     
     def _single_input_generator_val(self, index):
+        
+        [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
         image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
         label_2, label_3, label_4, label_5 = self.data_labels(bboxes)

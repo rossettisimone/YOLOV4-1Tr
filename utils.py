@@ -293,8 +293,13 @@ def conf_proposals(proposal):
 
 def nms_proposals(proposal):
     # remove unconsistent bboxes; x2>x1 and y2>y1
-    indices = tf.squeeze(tf.where(tf.logical_and(tf.greater(proposal[...,3], \
-                        proposal[...,1]),tf.greater(proposal[...,2],proposal[...,0]))),axis=-1)
+    width = proposal[...,2] - proposal[...,0]
+    height = proposal[...,3] - proposal[...,1]
+    mask_dim = tf.logical_and(tf.greater(width, cfg.MIN_BOX_DIM), tf.greater(height, cfg.MIN_BOX_DIM))
+    mask_ratio = tf.logical_and(tf.greater(width/height, cfg.MIN_BOX_RATIO),\
+        tf.greater(height/width, cfg.MIN_BOX_RATIO))
+    mask = tf.logical_and(mask_dim,mask_ratio)
+    indices = tf.squeeze(tf.where(mask),axis=-1)
     proposal = tf.gather(proposal,indices)
 
     padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
