@@ -7,7 +7,7 @@ import config as cfg
 from backbone import cspdarknet53
 from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode,CustomProposalLayer, PyramidROIAlign_AFP
 import gc
-from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss, decode_delta, xyxy2xywh, xywh2xyxy, show_image
+from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss, decode_delta, xyxy2xywh, xywh2xyxy, show_image, filter_inputs
 from datetime import datetime
 
 class fpn(tf.keras.Model):
@@ -96,8 +96,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
         self.emb_dim = cfg.EMB_DIM 
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
-        self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)
-        self.optimizer.clipvalue = cfg.GRADIENT_CLIP
+        self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False, clipnorm = cfg.GRADIENT_CLIP) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)
 #        self.strategy = tf.distribute.MirroredStrategy()
 
         #CSPDARKNET53 
@@ -237,7 +236,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
         mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
         mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
-        if tf.greater(tf.reduce_sum(proposals),0.0):
+        if tf.greater(tf.reduce_sum(proposals),0.0) :
             alb_loss = tf.math.exp(-self.s_mc)*mrcnn_class_loss + tf.math.exp(-self.s_mr)*mrcnn_box_loss \
                     + tf.math.exp(-self.s_mm)*mrcnn_mask_loss + (self.s_mr + self.s_mc + self.s_mm) #Automatic Loss Balancing        
         else:
@@ -265,8 +264,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         if epochs is not None:
             self.epochs = epochs
         self.start_epoch = start_epoch
-        train_generator = self.ds.train_ds.repeat().batch(self.batch).__iter__()
-        val_generator = self.ds.val_ds.repeat().batch(self.batch).__iter__()
+        train_generator = self.ds.train_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
+        val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
+        
         while self.epoch < self.epochs:
             if self.freeze_bkbn and self.epoch < 2:
                 self.bkbn.trainable = False
@@ -281,6 +281,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
+                self.denses_summary(training = True)
                 self.step_train += 1
             self.set_trainable(trainable = False, include_backbone = True)
             mean_loss = []
@@ -291,6 +292,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 mean_loss.append(losses[0])
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
+                self.denses_summary(training = False)
                 self.step_val += 1
             path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
@@ -393,6 +395,27 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                     with tf.name_scope('output'):
                         preactivate = tf.matmul(input_tensor, self.classifier.kernel) + self.classifier.bias
                         tf.summary.histogram('output', preactivate, step=step)
+        self.writer.flush()
+
+    def denses_summary(self, training):
+        with self.writer.as_default():
+            scope = 'train' if training else 'val'
+            step = self.step_train if training else self.step_val
+            with tf.name_scope(scope):
+                for layer in self.fpn_classifier.layers[0].layers:
+                    if layer.name == 'mrcnn_class_logits' or layer.name == 'mrcnn_bbox_fc':
+                        with tf.name_scope(layer.name):
+                            with tf.name_scope('weights'):
+                                self.variable_summaries(layer.layer.kernel,step)
+                            with tf.name_scope('biases'):
+                                self.variable_summaries(layer.layer.bias,step)
+                for layer in self.fpn_mask.layers[0].layers:
+                    if layer.name == 'mrcnn_mask_fc':
+                        with tf.name_scope(layer.name):
+                            with tf.name_scope('weights'):
+                                self.variable_summaries(layer.layer.kernel,step)
+                            with tf.name_scope('biases'):
+                                self.variable_summaries(layer.layer.bias,step)
         self.writer.flush()
         
     def set_trainable(self, trainable = True, include_backbone = False):
@@ -553,11 +576,11 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
                            name="mrcnn_class_shared")(x)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
     shared = tf.keras.layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name="pool_squeeze")(x)
-    #shared = tf.keras.layers.Lambda(lambda x: tf.keras.backend.squeeze(tf.keras.backend.squeeze(x, 3), 2),
-    #                       name="pool_squeeze")(x)
     # Classifier head
     mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes),
                                             name='mrcnn_class_logits')(shared)
+    # kernel_regularizer=tf.keras.regularizers.L1(0.01),
+    # activity_regularizer=tf.keras.regularizers.L2(0.01)
     mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),
                                      name="mrcnn_class")(mrcnn_class_logits)
 
@@ -565,8 +588,8 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
     # [batch, num_rois, NUM_CLASSES * (dx, dy, log(dw), log(dh))]
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes * 4, activation='linear'),
                            name='mrcnn_bbox_fc')(shared)
-    # Reshape to [batch, num_rois, NUM_CLASSES, (dx, dy, log(dw), log(dh))]
-#    s = tf.keras.backend.int_shape(x)
+    # kernel_regularizer=tf.keras.regularizers.L1(0.01),
+    # activity_regularizer=tf.keras.regularizers.L2(0.01)
     mrcnn_bbox = tf.keras.layers.Reshape((x.shape.as_list()[1], num_classes, 4), name="mrcnn_bbox")(x)
 
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
