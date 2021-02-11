@@ -6,5 +6,6 @@ __pycache__/*
 *.weights
 /logdir
 /__pycache__
-
+/weights
+weights/*
 
