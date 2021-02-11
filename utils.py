@@ -278,8 +278,8 @@ def decode_delta_map(delta_map, anchors):
     return pred_map
 
 def check_proposals(proposal):
-    indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
-    proposal = tf.gather(proposal,indices)
+    # indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
+    # proposal = tf.gather(proposal,indices)
 
     # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
     # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
@@ -314,7 +314,7 @@ def check_proposals(proposal):
 def nms_proposals(proposal):
     # non max suppression
     indices = tf.image.non_max_suppression(proposal[...,:4], proposal[...,4], max_output_size=cfg.MAX_PROP, 
-                         iou_threshold=cfg.NMS_THRESH, score_threshold=cfg.CONF_THRESH)
+                         iou_threshold=cfg.NMS_THRESH) # score_threshold=cfg.CONF_THRESH
     proposal = tf.gather(proposal, indices) #b x n rois x (4+1+1+208)
     
     proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP)) # automatic zero padding

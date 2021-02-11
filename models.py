@@ -274,7 +274,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.bkbn.trainable = True
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
-            # self.adapt_lr()
+            self.adapt_lr()
             self.set_trainable(trainable = True, include_backbone = False)
             while self.step_train < self.epoch * self.steps_train :
                 data = train_generator.next()

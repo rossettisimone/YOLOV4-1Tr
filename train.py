@@ -6,7 +6,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
 
 import tensorflow as tf
 #tf.get_logger().setLevel('WARNING')
-tf.compat.v1.reset_default_graph()
+# tf.compat.v1.reset_default_graph()
 # tf.debugging.enable_check_numerics()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
