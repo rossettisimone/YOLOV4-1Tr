@@ -7,7 +7,7 @@ Created on Mon Dec 21 18:37:18 2020
 """
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, conf_proposals
+from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, check_proposals
 
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
@@ -184,10 +184,10 @@ class CustomProposalLayer(tf.keras.layers.Layer):
             if embeddings:
                 pemb = embeddings[i]
                 pemb = tf.math.l2_normalize(tf.tile(pemb[:,tf.newaxis],(1,cfg.NUM_ANCHORS,1,1,1)), axis=-1, epsilon=1e-12)
-                preds = tf.concat([preds, pemb], axis=-1)     
+                preds = tf.concat([preds, pemb], axis=-1)
                 
             proposal = tf.reshape(preds, [tf.shape(preds)[0], -1, tf.shape(preds)[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
-            proposal = tf.map_fn(conf_proposals, proposal, fn_output_signature=tf.float32)
+            proposal = tf.map_fn(check_proposals, proposal, fn_output_signature=tf.float32)
             proposals.append(proposal)
             
         proposals = tf.concat(proposals,axis=1) #concat along levels

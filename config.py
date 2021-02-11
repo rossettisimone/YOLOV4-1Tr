@@ -2,18 +2,25 @@
 # VIDEOS_DATASET_PATH = "/home/temir/Documents/AVA/Dataset/Kin200/"
 # ANNOTATION_PATH = "/home/temir/Documents/AVA/Dataset/prova.json"
 #import numpy as np
-GPU = '0'
-DATASET_TYPE = 'ava'
+GPU = '3'
+# DATASET_TYPE = 'ava'
 
-# AVA_path 
-VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
-SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"
-ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json" # #ava_frames_boundings_train_v2.2.json
+# AVA META PATHS
+VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames/"
+SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/masks/"
+
+# AVA JSON PATHS
+TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json","/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json"] # #ava_frames_boundings_train_v2.2.json
+# TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"] # #ava_frames_boundings_train_v2.2.json
+VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+
+MIN_BOX_DIM = 0.15
+MIN_BOX_RATIO = 0.2
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 2
-TRAIN_SIZE = 416#416
+BATCH = 8
+TRAIN_SIZE = 416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
 
@@ -21,10 +28,11 @@ ID_THRESH = 0.5
 FG_THRESH = 0.5
 BG_THRESH = 0.3
 
+IOU_THRESH = 0.5
 # Network
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
-MAX_BBOX_PER_SCALE = 20 #150
+MAX_BBOX_PER_SCALE = 20
 ANCHORS = [4,12, 6,22, 8,37, 11,20, 
            24,96, 29,64, 33,109, 38,85, 
            91,227, 96,124, 111,182, 123,239, 
@@ -55,13 +63,13 @@ NUM_ANCHORS = 4
 BBOX_CLASS = 4
 BBOX_REG = 1
 MASK=0
-STRIDES = [ 4, 8, 16, 32] #2
+STRIDES = [ 4, 8, 16, 32]
 #ANCHORS =  [  7,   7,  14,  28,  28, 21,  35,  56, 
 #            13,  13,  26,  52,  52,  39,  65, 104, 
 #            26,  26,  52, 104, 104,  78, 130, 208, 
 #            52,  52, 104, 208, 208, 156, 260, 416] #1,   1,   2,   4,   4,   3,   5,   8,
 #XYSCALE= [1.4, 1.3, 1.2, 1.1, 1.05]
-LEVELS = 4 #5
+LEVELS = 4
 EMB_DIM = 208
 CSP_DARKNET53 = './weights/yolov4.weights'
 MSDS_WEIGHTS = './MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf'
@@ -69,18 +77,21 @@ MSDS_WEIGHTS = './MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf'
 WD = 1e-4
 LR = 1e-3
 MOM = 0.9
-EPOCHS = 30
+GRADIENT_CLIP = 5.0
+EPOCHS = 60
 
 CONF_THRESH = 0.7
 NMS_THRESH = 0.3
 STEPS_PER_EPOCH_TRAIN = 1000
 STEPS_PER_EPOCH_VAL = 50
 
+RPN_NMS_THRESHOLD = 0.7
+PRE_NMS_LIMIT = 1000
+POST_NMS_ROIS_TRAINING = 300
+POST_NMS_ROIS_INFERENCE = 100
+
 MAX_PROP = 100
 
 POOL_SIZE = 7
 MASK_POOL_SIZE = 14
 MASK_SIZE = 28
-
-
-TRACK_BUFFER = 30
