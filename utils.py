@@ -14,9 +14,10 @@ import config as cfg
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import random
+from compute_ap import compute_ap_range
 
 def filter_inputs(image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes):
-    return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0)
+    return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0.0) and tf.greater(tf.reduce_sum(gt_masks), 0.0)
 
 def file_reader(file_name):
     with open(file_name) as json_file:
@@ -174,20 +175,23 @@ def show_infer(data, prediction):
                 show_image(tf.cast(image*255,tf.uint8).numpy()[i])
             tf.print('Found {} subjects'.format(len(bbox)))
     
-def show_mAP(data, prediction, mode='print'):
+def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     nB = tf.shape(image)[0]
-    if len(prediction)>3:
+    mean_AP = []
+    if len(prediction)>3: # if masks are present
         preds, embs, proposals, logits, probs, bboxes, masks = prediction
         for i in range(nB):
             gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
             pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], probs[i], bboxes[i], masks[i])
-            if len(gt_bbox)>0:
+            if len(gt_bbox)>0: # this is never the case but better to put
                 AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
                          pred_box, pred_class_id, pred_score, pred_mask,
-                         iou_thresholds=[0.5], verbose=1)
-                if mode=='return':
-                    return AP
+                         iou_thresholds=iou_thresholds, verbose=verbose)
+                mean_AP.append(AP)
+    if len(mean_AP) == 0: # this is never the case, but better to exclude the situation
+        mean_AP = [0.5]
+    return np.mean(mean_AP)
 #    else:
 #        preds, embs, proposals = prediction
 #        for i in range(nB):

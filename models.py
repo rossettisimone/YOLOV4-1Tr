@@ -7,7 +7,7 @@ import config as cfg
 from backbone import cspdarknet53
 from layers import CustomUpsampleAndConcatAndShuffle, CustomDownsampleAndConcatAndShuffle, CustomDecode,CustomProposalLayer, PyramidROIAlign_AFP
 import gc
-from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss, decode_delta, xyxy2xywh, xywh2xyxy, show_image, filter_inputs
+from utils import entry_stop_gradients, preprocess_mrcnn, mrcnn_class_loss_graph, mrcnn_bbox_loss_graph, mrcnn_mask_loss_graph, draw_bbox, smooth_l1_loss, decode_delta, xyxy2xywh, xywh2xyxy, show_image, filter_inputs, show_mAP
 from datetime import datetime
 
 class fpn(tf.keras.Model):
@@ -96,7 +96,7 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False, clipnorm = cfg.GRADIENT_CLIP) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)
 
         #CSPDARKNET53 
-        self.bkbn = cspdarknet53()
+        self.bkbn = cspdarknet53(pretrained = self.freeze_bkbn) # if pretrained freeze backbone
         #PANET LIKE
         self.neck = fpn()
         #YOLO LIKE
@@ -245,29 +245,31 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
         labels = [label_2, labe_3, label_4, label_5]
         if self.mask:
-            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training)
+            predictions = self(image, training=training)
+            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
             proposals = proposals[...,:4]
             target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
             alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
         else:
-            preds, embs = self(image, training=training)
+            predictions = self(image, training=training)
+            preds, embs = predictions
             alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
         
-        return [alb_total_loss] + loss_list
+        return [alb_total_loss] + loss_list, predictions
         
     def fit(self, epochs = None, start_epoch = 0):
         assert self.ds is not None, 'DataLoader is required'
         if epochs is not None:
             self.epochs = epochs
         self.start_epoch = start_epoch
-        # train_generator = self.ds.train_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
-        # val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch)
-        train_generator = self.ds.train_ds.apply(tf.data.experimental.copy_to_device("/gpu:0"))\
-                .prefetch(tf.data.experimental.AUTOTUNE).repeat()\
-                .filter(filter_inputs).batch(self.batch).__iter__()
-        val_generator = self.ds.val_ds.apply(tf.data.experimental.copy_to_device("/gpu:0"))\
-                .prefetch(tf.data.experimental.AUTOTUNE).repeat()\
-                .filter(filter_inputs).batch(self.batch)
+        # train_generator = self.ds.train_ds.repeat().filter(filter_inputs).batch(self.batch).prefetch(tf.data.experimental.AUTOTUNE).__iter__()
+        # val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch).prefetch(tf.data.experimental.AUTOTUNE)
+        train_generator = self.ds.train_ds.repeat()\
+                .filter(filter_inputs).batch(self.batch).apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE).__iter__()
+        val_generator = self.ds.val_ds.repeat()\
+                .filter(filter_inputs).batch(self.batch).apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE)
         
         while self.epoch < self.epochs:
             if self.freeze_bkbn and self.epoch < 2:
@@ -287,57 +289,34 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                     self.denses_summary(training = True)
                 self.step_train += 1
             self.set_trainable(trainable = False, include_backbone = True)
-            mean_loss = []
+            mean_AP = []
             gc.collect()
-            val = val_generator.__iter__()
+            val = val_generator.__iter__() # use always same batchs
             while self.step_val < self.epoch * self.steps_val :
                 data = val.next()
-                losses = self.test_step(data) 
-                mean_loss.append(losses[0])
+                losses, predictions = self.test_step(data) 
+                mean_AP.append(show_mAP(data, predictions))
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
                 if self.mask:
                     self.denses_summary(training = False)
+                    self.mAP_summary(tf.reduce_mean(mean_AP))
                 self.step_val += 1
-            path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_AP),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
             gc.collect()
             self.epoch += 1
     
-#    @tf.function
+    @tf.function
     def infer(self, image):
-        training = True
         if self.mask:
-            preds, embs, proposals, logits, probs, bboxes, masks = self(image, training=training)
-            #decode_delta(encoded_gt_bboxes, valid_proposals)
+            preds, embs, proposals, logits, probs, bboxes, masks = self(image, training = False)
+            return preds, embs, proposals, logits, probs, bboxes, masks
         else:
-            preds, embs = self(image, training=training)
-            proposals = CustomProposalLayer()(preds, embs, training)
-        
-        nB = tf.shape(image)[0]
-        for i in range(nB):
-            proposal = proposals[i]
-            bbox = bboxes[i]
-            mask = masks[i]
-            if tf.greater(tf.reduce_sum(proposal),0.0):
-                valid = tf.reduce_sum(tf.cast(tf.greater(tf.reduce_sum(proposals, axis=-1),0.0),tf.int32))
-                pr = proposal[:valid,:4]
-                pr = xyxy2xywh(pr)#tf.constant([0.125,0.05,0.0,0.0])#*cfg.TRAIN_SIZE
-                bb = bbox[:valid,1,:4]
-                bb = decode_delta(bb, pr)
-                bb = xywh2xyxy(bb)
-                bb = tf.clip_by_value(bb,0.0,1.0)
-                bb = tf.round(bb*cfg.TRAIN_SIZE)
-                confs = proposal[:valid,4] 
-                mask = mask[:valid,:,:,1]
-                tf.print('Found')
-                prop = proposal[:valid,:4]*cfg.TRAIN_SIZE
-                # Final proposals are obtained in dets. Information of bounding box and embeddings also included
-                draw_bbox(image[i], prop, bb, mask, confs)
-            else:
-                tf.print('None')
-                show_image(tf.cast(image*255,tf.uint8).numpy()[i])
-    
+            preds, embs = self(image, training = False)
+            proposals = CustomProposalLayer()(preds, embs, training = False)
+            return preds, embs, proposals
+
     def print_loss(self, losses, training=True):
         if training:
             res = "=> EPOCH {}  TRAIN STEP {}/{}  lr: {:0.5f}  auto_loss_bal: "\
@@ -422,7 +401,13 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                             with tf.name_scope('biases'):
                                 self.variable_summaries(layer.layer.bias,step)
         self.writer.flush()
-        
+    
+    def mAP_summary(self, mean_AP):
+        with self.writer.as_default():
+            with tf.name_scope('val'):
+                with tf.name_scope('mAP_0.5:0.05:0.95'):
+                    tf.summary.scalar("mean_AP", tf.squeeze(mean_AP), step=self.step_val)
+
     def set_trainable(self, trainable = True, include_backbone = False):
         start = 0 if include_backbone else 1
         for net in self.layers[start:]:
@@ -534,7 +519,7 @@ class fpn_classifier_AFP(tf.keras.Model):
     def get_output_shape(self):
         return [out.shape for out in self.call(self.get_input_shape())]
 
-def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=1024):
+def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=1024, train_bn = None):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
     rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
@@ -557,27 +542,27 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
     x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_classifier")(inputs)
     x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp2')(x2)
-    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp2_gn')(x2)
+    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp2_gn')(x2, training = train_bn)
     x2 = tf.keras.layers.Activation('relu', name='roi_class_afp2_gn_relu')(x2)
     x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp3')(x3)
-    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp3_gn')(x3)
+    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp3_gn')(x3, training = train_bn)
     x3 = tf.keras.layers.Activation('relu', name='roi_class_afp3_gn_relu')(x3)
     x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp4')(x4)
-    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp4_gn')(x4)
+    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp4_gn')(x4, training = train_bn)
     x4 = tf.keras.layers.Activation('relu', name='roi_class_afp4_gn_relu')(x4)
     x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp5')(x5)
-    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp5_gn')(x5)
+    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp5_gn')(x5, training = train_bn)
     x5 = tf.keras.layers.Activation('relu', name='roi_class_afp5_gn_relu')(x5)
 
     x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv1")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv1_gn')(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv1_gn')(x, training = train_bn)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv1_gn_relu')(x)
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv2")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv2_gn')(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv2_gn')(x, training = train_bn)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv2_gn_relu')(x)
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv3")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv3_gn')(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv3_gn')(x, training = train_bn)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv3_gn_relu')(x)
 
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
@@ -620,7 +605,7 @@ class fpn_mask_AFP(tf.keras.Model):
     def get_output_shape(self):
         return self.call(self.get_input_shape()).shape
 
-def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=2):
+def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=2, train_bn = None):
     """Builds the computation graph of the mask head of Feature Pyramid Network.
     rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
           coordinates.
@@ -637,42 +622,42 @@ def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
     x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_mask")(inputs)
     x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp2')(x2)
-    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp2_gn')(x2)
+    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp2_gn')(x2, training = train_bn)
     x2 = tf.keras.layers.Activation('relu', name='roi_mask_afp2_gn_relu')(x2)
     x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp3')(x3)
-    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp3_gn')(x3)
+    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp3_gn')(x3, training = train_bn)
     x3 = tf.keras.layers.Activation('relu', name='roi_mask_afp3_gn_relu')(x3)
     x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp4')(x4)
-    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp4_gn')(x4)
+    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp4_gn')(x4, training = train_bn)
     x4 = tf.keras.layers.Activation('relu', name='roi_mask_afp4_gn_relu')(x4)
     x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp5')(x5)
-    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp5_gn')(x5)
+    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp5_gn')(x5, training = train_bn)
     x5 = tf.keras.layers.Activation('relu', name='roi_mask_afp5_gn_relu')(x5)
 
     x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
                            name="mrcnn_mask_conv1")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn1')(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn1')(x, training = train_bn)
     x = tf.keras.layers.Activation('relu')(x)
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
                            name="mrcnn_mask_conv2")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn2')(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn2')(x, training = train_bn)
     shared = tf.keras.layers.Activation('relu')(x)
 
     x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
                            name="mrcnn_mask_conv3")(shared)
-    x_fcn = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn3')(x_fcn)
+    x_fcn = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn3')(x_fcn, training = train_bn)
     x_fcn = tf.keras.layers.Activation('relu')(x_fcn)
     x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2DTranspose(cfg.EMB_DIM, (2, 2), strides=(2, 2), activation="relu"),
                            name="mrcnn_mask_deconv")(x_fcn)
 
     x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
                            name="mrcnn_mask_conv4")(shared)
-    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn4')(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn4')(x_ff, training = train_bn)
     x_ff = tf.keras.layers.Activation('relu')(x_ff)
     x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM//2, (3, 3), padding="same"),
                               name="mrcnn_mask_conv5")(x_ff)
-    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn5')(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn5')(x_ff, training = train_bn)
     x_ff = tf.keras.layers.Activation('relu')(x_ff)
     x_ff_shape = x_ff.shape.as_list()
     x_ff = tf.keras.layers.Reshape((x_ff_shape[1], x_ff_shape[2]*x_ff_shape[3]*x_ff_shape[4]))(x_ff)
