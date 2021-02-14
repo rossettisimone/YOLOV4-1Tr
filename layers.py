@@ -139,7 +139,7 @@ class CustomDecode(tf.keras.layers.Layer):
         self.STRIDE = self.STRIDES[level]
 #        self.XYSCALE = tf.constant(cfg.XYSCALE,dtype=tf.float32)
         self.filters = 2**(6+level)
-        self.bbox_filters = self.NUM_ANCHORS * (self.NUM_CLASS + self.BBOX_CLASS + self.BBOX_REG + self.MASK)
+        self.bbox_filters = self.NUM_ANCHORS * (self.NUM_CLASS + self.BBOX_CLASS + self.BBOX_REG)
         self.ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[self.LEVELS, self.NUM_ANCHORS, 2])[level]
         self.emb_dim = cfg.EMB_DIM 
         
@@ -171,6 +171,7 @@ class CustomProposalLayer(tf.keras.layers.Layer):
         proposals = []
         for i in range(cfg.LEVELS):
             pred = predictions[i]
+            pred = tf.transpose(pred,(0,1,3,2,4))
             pconf = pred[..., 4:6]  # Conf
             pconf = tf.nn.softmax(pconf, axis=-1)[...,1][...,tf.newaxis] # 1 is foreground
             pbox = pred[..., :4]

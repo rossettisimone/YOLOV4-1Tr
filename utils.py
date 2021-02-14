@@ -112,30 +112,119 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
 
-# TODO      
-def draw_bbox(image, prop, bboxs, masks, conf_id=None):
+def decode_proposal(proposal, mode='cut'):
+    bbox = proposal[...,:4]
+    bbox = tf.clip_by_value(bbox,0.0,1.0)
+    bbox = tf.round(bbox*cfg.TRAIN_SIZE).numpy()
+    conf = proposal[...,4].numpy()
+    if mode == 'cut':
+        mask = conf>cfg.CONF_THRESH
+        return bbox[mask], conf[mask]
+    else:
+        return bbox, conf
+
+def decode_mask(proposal, prob, bbox_mrcnn, mask_mrcnn, mode='keep'):
+    bbox = proposal[...,:4]
+    bbox = xyxy2xywh(bbox)
+    bbox_mrcnn = bbox_mrcnn[...,1,:4]
+    bbox_mrcnn = decode_delta(bbox_mrcnn, bbox)
+    bbox_mrcnn = xywh2xyxy(bbox_mrcnn)
+    bbox_mrcnn = tf.clip_by_value(bbox_mrcnn,0.0,1.0)
+    bbox_mrcnn = tf.round(bbox_mrcnn*cfg.TRAIN_SIZE).numpy()
+    conf_mrcnn = prob[...,1].numpy()
+    mask_mrcnn = mask_mrcnn[...,1]
+    mask_mrcnn = tf.transpose(mask_mrcnn,(1,2,0)).numpy()
+    if mode == 'cut':
+        mask = conf_mrcnn>cfg.CONF_THRESH
+        pred_class_id = tf.cast(conf_mrcnn[mask]>0, tf.int32).numpy()
+        return bbox_mrcnn[mask], pred_class_id, conf_mrcnn[mask], mask_mrcnn[...,mask]
+    else:
+        pred_class_id = tf.cast(conf_mrcnn>cfg.CONF_THRESH, tf.int32).numpy()
+        return bbox_mrcnn, pred_class_id, conf_mrcnn, mask_mrcnn
+    
+def decode_ground_truth(gt_bboxes, gt_masks):
+    gt_bbox = gt_bboxes[...,:4]
+    gt_class_id = tf.cast(tf.reduce_sum(gt_bbox,axis=-1)>0,tf.int32)
+    valid_gt = tf.math.maximum(1,tf.reduce_sum(gt_class_id))
+    gt_bbox = gt_bbox[:valid_gt].numpy()
+    gt_class_id = gt_class_id[:valid_gt].numpy()
+    gt_mask = gt_masks[:valid_gt]
+    gt_mask = tf.transpose(gt_mask,(1,2,0)).numpy()
+    return gt_bbox, gt_class_id, gt_mask
+    
+def show_infer(data, prediction):
+    image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+    nB = tf.shape(image)[0]
+    if len(prediction)>3:
+        preds, embs, proposals, logits, probs, bboxes, masks = prediction
+        for i in range(nB):
+            bbox_mrcnn, id_mrcnn, conf_mrcnn, mask_mrcnn = decode_mask(proposals[i], probs[i], bboxes[i], masks[i], 'cut')
+            if len(bbox_mrcnn)>0:
+                draw_bbox(image[i], bboxs = bbox_mrcnn, masks = mask_mrcnn, conf_id = conf_mrcnn, mode= 'PIL')
+            else:
+                show_image(tf.cast(image*255,tf.uint8).numpy()[i])
+            tf.print('Found {} subjects'.format(len(bbox_mrcnn)))
+    else:
+        preds, embs, proposals = prediction
+        for i in range(nB):
+            bbox, conf = decode_proposal(proposals[i], 'cut')
+            if len(bbox)>0:
+                draw_bbox(image[i], prop = bbox, conf_id = conf, mode= 'PIL')
+            else:
+                show_image(tf.cast(image*255,tf.uint8).numpy()[i])
+            tf.print('Found {} subjects'.format(len(bbox)))
+    
+def show_mAP(data, prediction, mode='print'):
+    image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+    nB = tf.shape(image)[0]
+    if len(prediction)>3:
+        preds, embs, proposals, logits, probs, bboxes, masks = prediction
+        for i in range(nB):
+            gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
+            pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], probs[i], bboxes[i], masks[i])
+            if len(gt_bbox)>0:
+                AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
+                         pred_box, pred_class_id, pred_score, pred_mask,
+                         iou_thresholds=[0.5], verbose=1)
+                if mode=='return':
+                    return AP
+#    else:
+#        preds, embs, proposals = prediction
+#        for i in range(nB):
+            
+    
+def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
     colors = []
     for name, code in ImageColor.colormap.items():
          colors.append(name)
-    random.shuffle(colors)
+#    random.shuffle(colors)
     img = Image.fromarray(np.array(image.numpy()*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   
-    if conf_id == None:
+    if np.any(conf_id is None):
         conf_id = tf.zeros_like(bboxs)[...,0]
-    for i,(pro,bbox,conf) in enumerate(zip(prop.numpy(), bboxs.numpy(), conf_id.numpy())):
-        draw.rectangle(pro, outline = "red") 
-        draw.rectangle(bbox, outline = colors[i%len(colors)]) 
-        xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
-        draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"), fontsize = 15, fill=colors[i%len(colors)])
+    if np.any(bboxs is not None):
+        for i,(bbox,conf) in enumerate(zip(bboxs, conf_id)):
+            if np.any(bbox>0):
+                draw.rectangle(bbox, outline = colors[i%len(colors)]) 
+                xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
+                draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"), fontsize = 15, fill=colors[i%len(colors)])
+ 
     img = np.array(img)
-    for i, (mask, bbox) in enumerate(zip(masks.numpy(), bboxs.numpy())):
-        mask = Image.fromarray(mask)
-        xyxy = np.array(bbox,dtype=np.int32)
-        wh = np.array(bbox[2:]-bbox[:2],dtype=np.int32)
-        mask = np.round(mask.resize((wh[0], wh[1]),Image.ANTIALIAS))
-        mask = np.array(Image.new('RGB', (wh[0], wh[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
-        img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]] = img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]]*0.5+mask*0.5
-    show_image(img)
+    if np.any(masks is not None):
+        masks = np.transpose(masks,(2,0,1))
+        for i, (mask, bbox) in enumerate(zip(masks, bboxs)):
+            mask = Image.fromarray(mask)
+            xyxy = np.array(bbox,dtype=np.int32)
+            wh = np.array(bbox[2:4]-bbox[:2],dtype=np.int32)
+            if np.all(wh>0):
+                mask = np.round(mask.resize((wh[0], wh[1]),Image.ANTIALIAS))
+                mask = np.array(Image.new('RGB', (wh[0], wh[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
+                img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]][mask>0] = img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]][mask>0]*0.5+mask[mask>0]*0.5
+    if mode == 'PIL':
+        show_image(img)
+    else:
+        return img
+
 
 def show_image(img):
     img = Image.fromarray(img)               
@@ -204,7 +293,7 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
 #    tid = tf.transpose(tid,(0,2,1,3))
 #    tconf, tbox, tid = tf.cast(tconf,tf.float32), tf.cast(tbox,tf.float32), tf.cast(tid,tf.float32)
     label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
-#    label = tf.transpose(label,(0,2,1,3))
+    label = tf.transpose(label,(0,2,1,3))
     return label
 
 

@@ -69,8 +69,8 @@ class Generator(object):
         #check consistency of bbox after data augmentation: dimension and ratio
         width = bboxes[...,2] - bboxes[...,0]
         height = bboxes[...,3] - bboxes[...,1]
-        mask = (width > cfg.MIN_BOX_DIM) \
-            * (height > cfg.MIN_BOX_DIM) \
+        mask = (width > cfg.MIN_BOX_DIM*cfg.TRAIN_SIZE) \
+            * (height > cfg.MIN_BOX_DIM*cfg.TRAIN_SIZE) \
             * ((width/height)>cfg.MIN_BOX_RATIO) \
             * ((height/width)>cfg.MIN_BOX_RATIO)
         bboxes = bboxes[mask]

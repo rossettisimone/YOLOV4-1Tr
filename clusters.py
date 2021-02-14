@@ -19,7 +19,6 @@ import random
 import math
 
 
-
 def IOU(x,centroids):
     similarities = []
     k = len(centroids)
@@ -61,8 +60,8 @@ def write_anchors_to_file(centroids,X,anchor_file):
 
     print('Anchors = ', anchors[sorted_indices])
     
-    a = anchors[sorted_indices].flatten()
-    b = np.array([a*s for s in scales],dtype=np.int32).flatten()
+    a = np.reshape(anchors[sorted_indices], (anchors_per_level,levels,2))
+    b = np.array([a[i]*s for i,s in enumerate(scales)],dtype=np.int32).flatten()
     
     print('Anchors FPN = ', b)
     
@@ -123,50 +122,50 @@ def main():
     global width_in_cfg_file
     global height_in_cfg_file
     global levels
-    global base
     global scales
     global output_dir
     global num_clusters
+    global anchors_per_level
     
     width_in_cfg_file = 416.
     height_in_cfg_file = 416.
     levels = 4
-    base = 4
-    scales = [base*2**i for i in range(levels)]
+    anchors_per_level = 4
+    scales = [4,8,16,32]
     output_dir = './info'
-    num_clusters = 4
+    num_clusters = levels * anchors_per_level
     
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
-  
+    from utils import read_image
+    from PIL import Image
     from utils import file_reader
     import config as cfg
-    lines = file_reader(cfg.ANNOTATION_PATH)
-#    lines = [line.rstrip('\n') for line in f.readlines()]
+    lines = []
+    PATHS = ["kinetics_frames_masks_train_v1.0.json", "ava_frames_masks_train_v2.2.json"]
+    for file_path in PATHS:
+        lines += file_reader(file_path)
+        print('Train Dataset {} loaded'.format(file_path))
     
     annotation_dims = []
 
-#    size = np.zeros((1,1,3))
     for line in lines:
-                    
-        #line = line.replace('images','labels')
-        #line = line.replace('img1','labels')
-#        line = line.replace('JPEGImages','labels')        
-#        
-#
-#        line = line.replace('.jpg','.txt')
-#        line = line.replace('.png','.txt')
-#        print(line)
-#        f2 = open(line)
+        v_id =  line['v_id']
+        frame_name = line['f_l'][30]
+        w, h = int(line['w']), int(line['h'])
+        ih, iw = (416, 416)
+        scale = min(iw/w, ih/h)
+        nw, nh  = int(scale * w), int(scale * h)
         for l in line['p_l']:
-#            line = line.rstrip('\n')
             box = l['bb_l'][30]
-            w,h = box[2]-box[0], box[3]-box[1]           
-            #print(w,h)
-            annotation_dims.append(tuple(map(float,(w,h))))
+            xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
+            box=np.array([min(xx),min(yy),max(xx),max(yy)])
+            box=np.clip(box,0,1)
+            W,H = (box[2]-box[0])*w/nw, (box[3]-box[1])*h/nh       
+            annotation_dims.append(tuple(map(float,(W,H))))
     annotation_dims = np.array(annotation_dims)
-  
+    print(annotation_dims.shape)
     eps = 0.005
     
     if num_clusters == 0:

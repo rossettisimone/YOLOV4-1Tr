@@ -29,14 +29,11 @@ class fpn(tf.keras.Model):
         p_4 = self.up_1(p_5,b_4, training)
         p_3 = self.up_2(p_4,b_3, training)
         p_2 = self.up_3(p_3,b_2, training)
-#        p_1 = self.up_4(p_2,b_1, training)
-#        n_1 = p_1
-#        n_2 = self.down_4(n_1,p_2, training)
         n_2 = p_2
         n_3 = self.down_3(n_2,p_3, training)
         n_4 = self.down_2(n_3,p_4, training)
         n_5 = self.down_1(n_4,p_5, training)
-        return  n_2, n_3, n_4, n_5 #n_1 #embedding
+        return  n_2, n_3, n_4, n_5
     
     def build_graph(self):
         return tf.keras.Model(inputs=self.get_input_shape(), outputs=self.call(self.get_input_shape()))
@@ -97,7 +94,6 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.emb_dim = cfg.EMB_DIM 
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False, clipnorm = cfg.GRADIENT_CLIP) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)
-#        self.strategy = tf.distribute.MirroredStrategy()
 
         #CSPDARKNET53 
         self.bkbn = cspdarknet53()
@@ -264,8 +260,14 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         if epochs is not None:
             self.epochs = epochs
         self.start_epoch = start_epoch
-        train_generator = self.ds.train_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
-        val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
+        # train_generator = self.ds.train_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
+        # val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch)
+        train_generator = self.ds.train_ds.apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE).repeat()\
+                .filter(filter_inputs).batch(self.batch).__iter__()
+        val_generator = self.ds.val_ds.apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE).repeat()\
+                .filter(filter_inputs).batch(self.batch)
         
         while self.epoch < self.epochs:
             if self.freeze_bkbn and self.epoch < 2:
@@ -274,25 +276,28 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.bkbn.trainable = True
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
-            self.adapt_lr()
+            # self.adapt_lr()
             self.set_trainable(trainable = True, include_backbone = False)
             while self.step_train < self.epoch * self.steps_train :
                 data = train_generator.next()
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
-                self.denses_summary(training = True)
+                if self.mask:
+                    self.denses_summary(training = True)
                 self.step_train += 1
             self.set_trainable(trainable = False, include_backbone = True)
             mean_loss = []
             gc.collect()
+            val = val_generator.__iter__()
             while self.step_val < self.epoch * self.steps_val :
-                data = val_generator.next()
+                data = val.next()
                 losses = self.test_step(data) 
                 mean_loss.append(losses[0])
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
-                self.denses_summary(training = False)
+                if self.mask:
+                    self.denses_summary(training = False)
                 self.step_val += 1
             path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
@@ -424,9 +429,12 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             net.trainable = trainable
         self.s_c._trainable = trainable
         self.s_r._trainable = trainable
-        self.s_mc._trainable = trainable
-        self.s_mr._trainable = trainable
-        self.s_mm._trainable = trainable
+        if self.emb:
+            self.s_id._trainable = trainable
+        if self.mask:
+            self.s_mc._trainable = trainable
+            self.s_mr._trainable = trainable
+            self.s_mm._trainable = trainable
             
     def freeze_batch_normalization(self):
         for net in self.layers:

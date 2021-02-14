@@ -14,7 +14,7 @@ TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_tr
 # TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"] # #ava_frames_boundings_train_v2.2.json
 VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
-MIN_BOX_DIM = 0.15
+MIN_BOX_DIM = 0.02
 MIN_BOX_RATIO = 0.2
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
@@ -24,8 +24,8 @@ TRAIN_SIZE = 416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
 
-ID_THRESH = 0.5
-FG_THRESH = 0.5
+ID_THRESH = 0.4
+FG_THRESH = 0.4
 BG_THRESH = 0.3
 
 IOU_THRESH = 0.5
@@ -33,10 +33,33 @@ IOU_THRESH = 0.5
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20
-ANCHORS = [4,12, 6,22, 8,37, 11,20, 
-           24,96, 29,64, 33,109, 38,85, 
-           91,227, 96,124, 111,182, 123,239, 
-           293,403, 333,488, 396,412, 438, 491]
+
+ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
+         27,  82,  57, 165, 102, 209, 181, 235,
+          41, 124,  86, 248, 154, 313, 272, 353,
+          55, 165, 114, 331, 205, 418, 363, 470]
+
+# [   4,   10,    6,   21,    9,   35,   13,   53,   30,   42,   39,
+#          76,   40,  127,   50,  227,  114,  203,  134,  130,  134,  286,
+#         174,  513,  366,  431,  447,  594,  569, 1122,  867, 1179]
+# [ 13,  41,  28,  82,  51, 104,  90, 117, 
+#          27,  82,  57, 165, 102, 209, 181, 235,
+#           41, 124,  86, 248, 154, 313, 272, 353,
+#           55, 165, 114, 331, 205, 418, 363, 470]
+
+# np.array([4,12, 6,22, 8,37, 11,20, 
+#            24,96, 29,64, 33,109, 38,85, 
+#            91,227, 96,124, 111,182, 123,239, 
+#            293,403, 333,488, 396,412, 438, 491])
+
+# ANCHORS = ANCHORS/416*TRAIN_SIZE
+# ANCHORS = np.array(ANCHORS, np.int32)
+
+# [   4,   10,    6,   21,    9,   35,   13,   53,   30,   42,   39,
+#          76,   40,  127,   50,  227,  114,  203,  134,  130,  134,  286,
+#         174,  513,  366,  431,  447,  594,  569, 1122,  867, 1179]
+
+
 #[ 13,  41,  28,  82,  51, 104,  90, 117, 
 #           27,  82,  57, 165, 102, 209, 181, 235,
 #           41, 124,  86, 248, 154, 313, 272, 353,
@@ -70,12 +93,12 @@ STRIDES = [ 4, 8, 16, 32]
 #            52,  52, 104, 208, 208, 156, 260, 416] #1,   1,   2,   4,   4,   3,   5,   8,
 #XYSCALE= [1.4, 1.3, 1.2, 1.1, 1.05]
 LEVELS = 4
-EMB_DIM = 208
+EMB_DIM = TRAIN_SIZE//2
 CSP_DARKNET53 = './weights/yolov4.weights'
 MSDS_WEIGHTS = './MSDS_noemb_mask_14_-22.57891_2021-02-01-21-35-00.tf'
 # Train
 WD = 1e-4
-LR = 1e-3
+LR = 1e-2
 MOM = 0.9
 GRADIENT_CLIP = 5.0
 EPOCHS = 60
@@ -93,5 +116,5 @@ POST_NMS_ROIS_INFERENCE = 100
 MAX_PROP = 100
 
 POOL_SIZE = 7
-MASK_POOL_SIZE = 14
-MASK_SIZE = 28
+MASK_POOL_SIZE = POOL_SIZE*2
+MASK_SIZE = MASK_POOL_SIZE*2 #28
