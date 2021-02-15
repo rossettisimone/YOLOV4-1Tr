@@ -370,6 +370,39 @@ def decode_delta_map(delta_map, anchors):
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
 
+def check_proposals_tensor(proposal):
+    # indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
+    # proposal = tf.gather(proposal,indices)
+
+    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
+    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
+    
+    # remove unconsistent bboxes; x2>x1 and y2>y1
+    width = proposal[...,2] - proposal[...,0]
+    height = proposal[...,3] - proposal[...,1]
+    
+    mask_dim = tf.logical_and(tf.greater(width, cfg.MIN_BOX_DIM), tf.greater(height, cfg.MIN_BOX_DIM))
+    mask_ratio = tf.logical_and(tf.greater(width/height, cfg.MIN_BOX_RATIO),\
+        tf.greater(height/width, cfg.MIN_BOX_RATIO))
+    mask = tf.logical_and(mask_dim,mask_ratio)
+    
+    indices = tf.tile(tf.cast(mask, tf.float32)[...,None],(1,1,5))
+    proposal = proposal * indices
+    
+    proposal = best_sort_batch(proposal)
+    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
+    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
+    
+
+    
+    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP), axis=1) # automatic zero padding
+
+    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0) # needed if cfg.MAX_PROP is high value
+    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
+#    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposal[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
+#    proposal = entry_stop_gradients(proposal, mask_non_zero_entry)
+    return proposal
+
 def check_proposals(proposal):
     # indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
     # proposal = tf.gather(proposal,indices)

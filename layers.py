@@ -7,8 +7,174 @@ Created on Mon Dec 21 18:37:18 2020
 """
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, check_proposals
+from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, check_proposals, check_proposals_tensor, nms_proposals_tensor
+from backbone import cspdarknet53_graph
+#
+#input_layer = tf.keras.layers.Input((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+#back = cspdarknet53_graph(input_layer)
+#pyr = yolov4_plus1_graph(back)
+#preds, emb = yolov4_plus1_decode_graph(pyr)
+#prop = yolov4_plus1_proposal_graph(preds)
+#mrcnn_class_logits, mrcnn_class, mrcnn_bbox = fpn_classifier_graph_AFP([rpn_proposals[...,:4],rpn_embeddings])
+#mrcnn_mask = build_fpn_mask_graph_AFP([rpn_proposals[...,:4],rpn_embeddings])
+#model = tf.keras.Model(inputs=inputs, outputs=[pred, emb, prop, mrcnn_class_logits, mrcnn_class, mrcnn_bbox, mrcnn_mask])
 
+def mish(x):
+    return x * tf.math.tanh(tf.math.softplus(x))
+
+def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky'):
+    if downsample:
+        x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
+        padding = 'valid'
+        strides = 2
+    else:
+        strides = 1
+        padding = 'same'
+    x = tf.keras.layers.Conv2D(filters=filters, kernel_size = kernel_size, strides=strides, padding=padding,
+                                  use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                  kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                                  bias_initializer=tf.constant_initializer(0.))(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    if activate == True:
+        if activate_type == "leaky":
+            x = tf.nn.leaky_relu(x, alpha=0.1)
+        elif activate_type == "mish":
+            x = mish(x)
+    return x
+
+def yolov4_plus1_graph(input_layers):
+    
+    b_2, b_3, b_4, b_5 = input_layers 
+    
+    # Top - Down FPN
+    p_5 = b_5
+    x = Conv2D(p_5, kernel_size = 1, filters = 256)
+    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    y = Conv2D(b_4, kernel_size = 1, filters = 256)
+    x = tf.concat([y,x], axis=-1)
+    
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    
+    p_4 = x
+    
+    x = Conv2D(p_4, kernel_size = 1, filters = 128)
+    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    y = Conv2D(b_3, kernel_size = 1, filters = 128)
+    x = tf.concat([y,x], axis=-1)
+    
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    
+    p_3 = x
+    
+    x = Conv2D(p_3, kernel_size = 1, filters = 64)
+    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    y = Conv2D(b_2, kernel_size = 1, filters = 64)
+    x = tf.concat([y,x], axis=-1)
+    
+    x = Conv2D(x, kernel_size = 1, filters = 64)
+    x = Conv2D(x, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = 64)
+    x = Conv2D(x, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = 64)
+    
+    p_2 = x
+    
+    # Bottom - Up Augmentation 
+    n_2 = p_2
+    
+    x = Conv2D(n_2, kernel_size = 3, filters = 128, downsample=True)
+    x = tf.concat([x, p_3], axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    
+    n_3 = x
+    
+    x = Conv2D(n_3, kernel_size = 3, filters = 256, downsample=True)
+    x = tf.concat([x, p_4], axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    
+    n_4 = x
+    
+    x = Conv2D(n_4, kernel_size = 3, filters = 512, downsample=True)
+    x = tf.concat([x, p_5], axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = 512)
+    x = Conv2D(x, kernel_size = 3, filters = 1024)
+    x = Conv2D(x, kernel_size = 1, filters = 512)
+    x = Conv2D(x, kernel_size = 3, filters = 1024)
+    x = Conv2D(x, kernel_size = 1, filters = 512)
+    
+    n_5 = x
+    
+    return n_2, n_3, n_4, n_5
+    
+def yolov4_plus1_decode_graph(input_layer):
+    
+    n_2, n_3, n_4, n_5 = input_layer
+    
+    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_2, kernel_size = 3, filters = 64)
+    x = Conv2D(x, kernel_size = 1, filters = cfg.NUM_ANCHORS * (cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG), activate=False, bn=False)#24
+    p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG]), perm = [0, 3, 1, 2, 4])
+    
+    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_3, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = cfg.NUM_ANCHORS * (cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG), activate=False, bn=False)#24
+    p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG]), perm = [0, 3, 1, 2, 4])
+    
+    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_4, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = cfg.NUM_ANCHORS * (cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG), activate=False, bn=False)#24
+    p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG]), perm = [0, 3, 1, 2, 4])
+    
+    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_5, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = cfg.NUM_ANCHORS * (cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG), activate=False, bn=False)#24
+    p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.NUM_CLASS + cfg.BBOX_CLASS + cfg.BBOX_REG]), perm = [0, 3, 1, 2, 4])
+    
+    return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
+
+def yolov4_plus1_proposal_graph(predictions):
+    proposals = []
+    ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
+    for i in range(cfg.LEVELS):
+        pred = predictions[i]
+        pred = tf.transpose(pred,(0,1,3,2,4)) # decode_delta_map has some issue
+        pconf = pred[..., 4:6]  # Conf
+        pconf = tf.nn.softmax(pconf, axis=-1)[...,1][...,tf.newaxis] # 1 is foreground
+        pbox = pred[..., :4]
+        pbox = decode_delta_map(pbox, ANCHORS[i]/cfg.STRIDES[i])
+        pbox *= cfg.STRIDES[i] # now in range [0, .... cfg.TRAIN_SIZE]
+        pbox /= cfg.TRAIN_SIZE #now normalized in [0...1]
+        pbox = xywh2xyxy(pbox) # to bbox
+        pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
+        preds = tf.concat([pbox, pconf], axis=-1) 
+        _, nA, nGh, nGw, nC = preds.shape       
+        proposal = tf.reshape(preds, [tf.shape(preds)[0], nA * nGh * nGw,nC]) # b x nBB x (4 + 1 + 1 + 208) rois
+#        proposal = tf.map_fn(check_proposals,proposal,fn_output_signature=tf.float32)
+        proposal = tf.keras.layers.Lambda(check_proposals_tensor)(proposal)
+        proposals.append(proposal)
+        
+    proposals = tf.concat(proposals,axis=1) #concat along levels
+    proposals = tf.map_fn(nms_proposals, proposals, fn_output_signature=tf.float32)
+#    proposals = nms_proposals_tensor(proposals)
+    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
+    proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
+    return proposals
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
     def call(self, x, training=False):
