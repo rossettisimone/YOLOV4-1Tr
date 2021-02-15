@@ -99,10 +99,9 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         self.emb_dim = cfg.EMB_DIM 
         self.emb_scale = (tf.math.sqrt(2.0) * tf.math.log(self.nID-1.0)) if self.nID>1.0 else 1.0
         self.optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False, clipnorm = cfg.GRADIENT_CLIP) #tf.keras.optimizers.Adam(learning_rate = cfg.LR)
-#        self.strategy = tf.distribute.MirroredStrategy()
 
         #CSPDARKNET53 
-        self.bkbn = cspdarknet53()
+        self.bkbn = cspdarknet53(pretrained = self.freeze_bkbn) # if pretrained freeze backbone
         #PANET LIKE
         self.neck = fpn()
         #YOLO LIKE
@@ -251,25 +250,31 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
         image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
         labels = [label_2, labe_3, label_4, label_5]
         if self.mask:
-            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = self(image, training=training)
+            predictions = self(image, training=training)
+            preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
             proposals = proposals[...,:4]
             target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
             alb_total_loss, *loss_list = self.compute_loss(labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
         else:
-            preds, embs = self(image, training=training)
+            predictions = self(image, training=training)
+            preds, embs = predictions
             alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
         
-        return [alb_total_loss] + loss_list
+        return [alb_total_loss] + loss_list, predictions
         
     def fit(self, epochs = None, start_epoch = 0):
         assert self.ds is not None, 'DataLoader is required'
         if epochs is not None:
             self.epochs = epochs
         self.start_epoch = start_epoch
-        train_generator = self.ds.train_ds.apply(tf.data.experimental.copy_to_device("/gpu:0"))\
-                .prefetch(tf.data.experimental.AUTOTUNE).repeat()\
-                .filter(filter_inputs).batch(self.batch).__iter__()
-        val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch).__iter__()
+        # train_generator = self.ds.train_ds.repeat().filter(filter_inputs).batch(self.batch).prefetch(tf.data.experimental.AUTOTUNE).__iter__()
+        # val_generator = self.ds.val_ds.repeat().filter(filter_inputs).batch(self.batch).prefetch(tf.data.experimental.AUTOTUNE)
+        train_generator = self.ds.train_ds.repeat()\
+                .filter(filter_inputs).batch(self.batch).apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE).__iter__()
+        val_generator = self.ds.val_ds.repeat()\
+                .filter(filter_inputs).batch(self.batch).apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE)
         
         while self.epoch < self.epochs:
             if self.freeze_bkbn and self.epoch < 2:
@@ -278,27 +283,31 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                 self.bkbn.trainable = True
             if self.freeze_bn: # finetuning 
                 self.freeze_batch_normalization() 
-            self.adapt_lr()
+            # self.adapt_lr()
             self.set_trainable(trainable = True, include_backbone = False)
             while self.step_train < self.epoch * self.steps_train :
                 data = train_generator.next()
                 losses = self.train_step(data)
                 self.loss_summary(losses, training=True)
                 self.print_loss(losses, training=True)
-                self.denses_summary(training = True)
+                if self.mask:
+                    self.denses_summary(training = True)
                 self.step_train += 1
             self.set_trainable(trainable = False, include_backbone = True)
-            mean_loss = []
+            mean_AP = []
             gc.collect()
+            val = val_generator.__iter__() # use always same batchs
             while self.step_val < self.epoch * self.steps_val :
-                data = val_generator.next()
-                losses = self.test_step(data) 
-                mean_loss.append(losses[0])
+                data = val.next()
+                losses, predictions = self.test_step(data) 
+                mean_AP.append(show_mAP(data, predictions))
                 self.loss_summary(losses, training=False)
                 self.print_loss(losses, training=False)
-                self.denses_summary(training = False)
+                if self.mask:
+                    self.denses_summary(training = False)
+                    self.mAP_summary(tf.reduce_mean(mean_AP))
                 self.step_val += 1
-            path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+            path = "./{}/weights/{}_{}_{}_{}_{:0.5f}_{}.tf".format(self.folder,self.name,'emb' if self.emb else 'noemb','mask' if self.mask else 'nomask',self.epoch, tf.reduce_mean(mean_AP),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
             self.save(path)
             gc.collect()
             self.epoch += 1
@@ -397,16 +406,25 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
                             with tf.name_scope('biases'):
                                 self.variable_summaries(layer.layer.bias,step)
         self.writer.flush()
-        
+    
+    def mAP_summary(self, mean_AP):
+        with self.writer.as_default():
+            with tf.name_scope('val'):
+                with tf.name_scope('mAP_0.5:0.05:0.95'):
+                    tf.summary.scalar("mean_AP", tf.squeeze(mean_AP), step=self.step_val)
+
     def set_trainable(self, trainable = True, include_backbone = False):
         start = 0 if include_backbone else 1
         for net in self.layers[start:]:
             net.trainable = trainable
         self.s_c._trainable = trainable
         self.s_r._trainable = trainable
-        self.s_mc._trainable = trainable
-        self.s_mr._trainable = trainable
-        self.s_mm._trainable = trainable
+        if self.emb:
+            self.s_id._trainable = trainable
+        if self.mask:
+            self.s_mc._trainable = trainable
+            self.s_mr._trainable = trainable
+            self.s_mm._trainable = trainable
             
     def freeze_batch_normalization(self):
         for net in self.layers:
