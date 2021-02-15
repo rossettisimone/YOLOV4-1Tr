@@ -1,13 +1,12 @@
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 import os
 import config as cfg
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
 
 import tensorflow as tf
-#tf.get_logger().setLevel('WARNING')
-# tf.compat.v1.reset_default_graph()
-# tf.debugging.enable_check_numerics()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
@@ -23,45 +22,76 @@ if gpus:
 else: 
     print('No GPU found')
 
-#mirrored_strategy = tf.distribute.MirroredStrategy(devices=[device.name for device in logical_devices])
-#print ('Number of devices: {}'.format(mirrored_strategy.num_replicas_in_sync))
-#with mirrored_strategy.scope():
-
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
 from models import MSDS
 from loader import DataLoader 
-
-# tensorboard --logdir /media/data4/Models/simenv/tracker/logdir --port 6006
-# scp /home/fiorapirri/Documents/workspace/tracker4/weights/yolov4.weights alcor@Alcor:/media/data4/Models/simenv/tracker/weights/yolov4.weights
 
 ds = DataLoader(shuffle=True, data_aug=True)
 model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()
-#model.plot()
-#model.bkbn.model.summary() 
-#model.neck.summary()
-#model.head.summary()
 model.summary()
-#model.load('./weights/MSDS_noemb_nomask_20_-5.56_2021-01-26-11-09-44.tf')
+
+#_________________________________________________________________
+#Layer (type)                 Output Shape              Param #   
+#=================================================================
+#cspdarknet53 (cspdarknet53)  multiple                  38727520  
+#_________________________________________________________________
+#fpn (fpn)                    multiple                  20000512  
+#_________________________________________________________________
+#rpn (rpn)                    multiple                  4958368   
+#_________________________________________________________________
+#custom_proposal_layer (Custo multiple                  0         
+#_________________________________________________________________
+#fpn_classifier_AFP (fpn_clas multiple                  13180794  
+#_________________________________________________________________
+#fpn_mask_AFP (fpn_mask_AFP)  multiple                  19474058  
+#=================================================================
+#Total params: 96,341,257
+#Trainable params: 57,582,969
+#Non-trainable params: 38,758,288
+#_________________________________________________________________
+
+#model.load('./weights/MSDS_noemb_mask_28_0.46876_2021-02-15-20-17-44.tf')
 #model.trainable = False # too fucking important for inferring
 model.fit()
 
-# import time
-# import contextlib
-# @contextlib.contextmanager
-# def options(options):
-#  old_opts = tf.config.optimizer.get_experimental_options()
-#  tf.config.optimizer.set_experimental_options(options)
-#  try:
-#    yield
-#  finally:
-#    tf.config.optimizer.set_experimental_options(old_opts)
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-# fps = 0
-# i=0
-# with options({'constant_folding': True}):
-# 	for image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes in ds.train_ds.take(4).batch(1):
-# 	  t0=time.time()
-# 		model.infer(image)
-# 	  i+=1
-# 	  fps+=1/(time.time()-t0)
-# 	  print(fps/i)
+import timeit
+
+input_layer = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+model.infer(input_layer); # Warm Up
+
+trials = 50
+print("Fps:", trials/timeit.timeit(lambda: model.infer(input_layer), number=trials))
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+import time 
+from utils import show_infer, show_mAP, draw_bbox, filter_inputs
+import numpy as np
+
+i = 0
+sec = 0
+AP = 0
+ds = DataLoader(shuffle=True, data_aug=False)
+iterator = ds.train_ds.filter(filter_inputs).repeat().apply(tf.data.experimental.copy_to_device("/gpu:0"))\
+                .prefetch(tf.data.experimental.AUTOTUNE)
+data = iterator.batch(1).__iter__().next()
+_ = model.infer(data[0])
+for data in iterator.take(100).batch(1):
+    image = data[0]
+    start = time.perf_counter()
+    predictions = model.infer(image)
+    end = time.perf_counter()-start
+    i+=1
+    sec += end
+    print(i/sec)
+    show_infer(data, predictions)
+    AP += show_mAP(data, predictions)
+    mAP = AP/i    
+    print(mAP)
+#    preds, embs, proposals, logits, probs, bboxes, masks = predictions
+#    image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')

@@ -33,6 +33,7 @@ class Generator(object):
         if self.data_aug:
             image, masks, bboxes = self.data_augment(image, masks, bboxes)
         image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
+#        masks, bboxes = self.data_pad(masks, bboxes)
         label_2, label_3, label_4, label_5 = self.data_labels(bboxes)
         masks = self.masks_preprocess(masks, bboxes)
         masks, bboxes = self.data_pad(masks, bboxes)
@@ -46,7 +47,6 @@ class Generator(object):
         return inputs
     
     def _single_input_generator_val(self, index):
-        
         [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
         image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
@@ -69,8 +69,8 @@ class Generator(object):
         #check consistency of bbox after data augmentation: dimension and ratio
         width = bboxes[...,2] - bboxes[...,0]
         height = bboxes[...,3] - bboxes[...,1]
-        mask = (width > cfg.MIN_BOX_DIM) \
-            * (height > cfg.MIN_BOX_DIM) \
+        mask = (width > cfg.MIN_BOX_DIM*cfg.TRAIN_SIZE) \
+            * (height > cfg.MIN_BOX_DIM*cfg.TRAIN_SIZE) \
             * ((width/height)>cfg.MIN_BOX_RATIO) \
             * ((height/width)>cfg.MIN_BOX_RATIO)
         bboxes = bboxes[mask]
@@ -86,9 +86,11 @@ class Generator(object):
         masks_resized = []
         for mask, bbox in zip(masks, bboxes):
             mask = Image.fromarray(mask[bbox[1]:bbox[3],bbox[0]:bbox[2]])
-            mask = np.round(mask.resize((cfg.MASK_SIZE,cfg.MASK_SIZE), Image.ANTIALIAS))
+            mask = mask.resize((cfg.MASK_SIZE,cfg.MASK_SIZE), Image.ANTIALIAS)
             mask = np.clip(mask,0,1)
+            mask = np.round(mask)
             masks_resized.append(mask)
+
         masks_resized = np.stack(masks_resized,axis=0)
         return masks_resized
         
@@ -112,6 +114,7 @@ class Generator(object):
             mask_resized = np.round(mask.resize((nw, nh),Image.ANTIALIAS))
             masks_padded[i, dh:nh+dh, dw:nw+dw] = mask_resized
         gt_boxes = np.array(gt_boxes,dtype=np.uint32)
+        gt_boxes = np.clip(gt_boxes,0,cfg.TRAIN_SIZE-1)
         return image_paded, masks_padded, gt_boxes
         
     def data_generator(self, video, frame_id):
@@ -125,30 +128,28 @@ class Generator(object):
             # assert np.isfinite(image).all(), 'nan values in image'
             height, width, _ = image.shape
             for person in video['p_l']:
-                try:
-                    box = person["bb_l"][frame_id]
-                    # assert np.isfinite(box).all(), 'nan values in box'
-                    if len(box)==8: # Siammask returns 8 scalars (rotated bbox, rectify them)
-                        xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
-                        box=np.array([min(xx),min(yy),max(xx),max(yy)])
-                    box=np.clip(box,0,1)
-                    try:
-                        p_id = person['p_id']
-                        # assert np.isfinite(p_id), 'nan values in p_id'
-                    except:
-                        p_id = 0
-                    box = np.r_[box,1]*np.array([width, height, width, height, p_id]) 
+                box = person["bb_l"][frame_id]
+                # assert np.isfinite(box).all(), 'nan values in box'
+                if len(box)==8: # Siammask returns 8 scalars (rotated bbox, rectify them)
+                    xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
+                    box=np.array([min(xx),min(yy),max(xx),max(yy)])
+                box=np.clip(box,0,1)
+                p_id = person['p_id']
+                # assert np.isfinite(p_id), 'nan values in p_id'
+                box = np.round(np.r_[box,1]*np.array([width, height, width, height, p_id]))
+                if box[2]>box[0] and box[3]>box[1]:
                     bboxes.append(box)
                     try:
                         path_mask = os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' )
-                        mask = mask_clamp(np.array(read_image(path_mask)))
+                        mask = np.array(read_image(path_mask))
+                        m_height, m_width = mask.shape[0], mask.shape[1]
+                        assert m_height == height and m_width == width, 'inconsistent dimensions'
+                        mask = mask_clamp(mask)
                         # assert np.isfinite(mask).all(), 'nan values in mask'
-                    except:
+                    except Exception as e:
+#                        print(e)
                         mask = np.array(Image.new('L', (width, height), color=0))
                     masks.append(mask)
-                except:
-                    bboxes.append(np.zeros((1,5), dtype=np.float32))
-                    masks.append(np.zeros((width, height), dtype=np.float32))
             bboxes = np.stack(bboxes,axis=0)
             masks = np.stack(masks,axis=0)
         except:

@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Feb 11 10:37:33 2021
+
+@author: fiorapirri
+"""
 import numpy as np
 
 
@@ -81,7 +88,6 @@ def compute_matches(gt_boxes, gt_class_ids, gt_masks,
 
     # Compute IoU overlaps [pred_masks, gt_masks]
     overlaps = compute_overlaps_masks(pred_masks, gt_masks)
-
     # Loop through predictions and find matching ground truth boxes
     match_count = 0
     pred_match = -1 * np.ones([pred_boxes.shape[0]])

@@ -7,10 +7,180 @@ Created on Mon Dec 21 18:37:18 2020
 """
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, check_proposals
+from utils import decode_delta_map, xywh2xyxy, nms_proposals, entry_stop_gradients, check_proposals, check_proposals_tensor, nms_proposals_tensor, decode_prediction
+from backbone import cspdarknet53_graph
 
+def mish(x):
+    return x * tf.math.tanh(tf.math.softplus(x))
+
+def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky'):
+    if downsample:
+        x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
+        padding = 'valid'
+        strides = 2
+    else:
+        strides = 1
+        padding = 'same'
+    x = tf.keras.layers.Conv2D(filters=filters, kernel_size = kernel_size, strides=strides, padding=padding,
+                                  use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                  kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                                  bias_initializer=tf.constant_initializer(0.))(x)
+    if bn: x = tf.keras.layers.BatchNormalization()(x)
+    if activate:
+        if activate_type == "leaky":
+            x = tf.nn.leaky_relu(x, alpha=0.1)
+        elif activate_type == "mish":
+            x = mish(x)
+    return x
+
+def yolov4_plus1_graph(input_layers):
+    
+    b_2, b_3, b_4, b_5 = input_layers 
+    
+    # Top - Down FPN
+    p_5 = b_5
+    x = Conv2D(p_5, kernel_size = 1, filters = 256)
+    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    y = Conv2D(b_4, kernel_size = 1, filters = 256)
+    x = tf.concat([y,x], axis=-1)
+    
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    
+    p_4 = x
+    
+    x = Conv2D(p_4, kernel_size = 1, filters = 128)
+    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    y = Conv2D(b_3, kernel_size = 1, filters = 128)
+    x = tf.concat([y,x], axis=-1)
+    
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    
+    p_3 = x
+    
+    x = Conv2D(p_3, kernel_size = 1, filters = 64)
+    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    y = Conv2D(b_2, kernel_size = 1, filters = 64)
+    x = tf.concat([y,x], axis=-1)
+    
+    x = Conv2D(x, kernel_size = 1, filters = 64)
+    x = Conv2D(x, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = 64)
+    x = Conv2D(x, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = 64)
+    
+    p_2 = x
+    
+    # Bottom - Up Augmentation 
+    n_2 = p_2
+    
+    x = Conv2D(n_2, kernel_size = 3, filters = 128, downsample=True)
+    x = tf.concat([x, p_3], axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    x = Conv2D(x, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = 128)
+    
+    n_3 = x
+    
+    x = Conv2D(n_3, kernel_size = 3, filters = 256, downsample=True)
+    x = tf.concat([x, p_4], axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    x = Conv2D(x, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = 256)
+    
+    n_4 = x
+    
+    x = Conv2D(n_4, kernel_size = 3, filters = 512, downsample=True)
+    x = tf.concat([x, p_5], axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = 512)
+    x = Conv2D(x, kernel_size = 3, filters = 1024)
+    x = Conv2D(x, kernel_size = 1, filters = 512)
+    x = Conv2D(x, kernel_size = 3, filters = 1024)
+    x = Conv2D(x, kernel_size = 1, filters = 512)
+    
+    n_5 = x
+    
+    return n_2, n_3, n_4, n_5
+    
+def yolov4_plus1_decode_graph(input_layer):
+    
+    n_2, n_3, n_4, n_5 = input_layer
+    
+    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
+    prediction_filters = cfg.NUM_ANCHORS * prediction_channels
+    
+    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_2, kernel_size = 3, filters = 64)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_3, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_4, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    x = Conv2D(n_5, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
+
+def yolov4_plus1_proposal_graph(predictions):
+    
+    ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
+
+    p_2, p_3, p_4, p_5 = predictions
+      
+    d_2 = decode_prediction(p_2, ANCHORS[0], cfg.STRIDES[0])
+    
+    d_3 = decode_prediction(p_3, ANCHORS[1], cfg.STRIDES[1])
+    
+    d_4 = decode_prediction(p_4, ANCHORS[2], cfg.STRIDES[2])
+    
+    d_5 = decode_prediction(p_5, ANCHORS[3], cfg.STRIDES[3])
+        
+    proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels
+    
+    proposals = nms_proposals_tensor(proposals)
+    
+    # stop backpropagation for all zero boxes, this leads to nan gradient due to log decoding
+    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
+    proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
+    
+    return proposals
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
+    """
+    "Frozen state" and "inference mode" are two separate concepts.
+    `layer.trainable = False` is to freeze the layer, so the layer will use
+    stored moving `var` and `mean` in the "inference mode", and both `gama`
+    and `beta` will not be updated !
+    """
     def call(self, x, training=False):
         if not training:
             training = tf.constant(False)
@@ -23,7 +193,7 @@ class CustomDummy(tf.keras.layers.Layer):
 
     def call(self, input_layer, training):
         return input_layer
-    
+
 class CustomConv2D(tf.keras.layers.Layer):
     def __init__(self, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky',name='custom_conv2d', n = 0, **kwargs):
         super(CustomConv2D, self).__init__(name = name + '_' + str(n), **kwargs)
@@ -139,7 +309,7 @@ class CustomDecode(tf.keras.layers.Layer):
         self.STRIDE = self.STRIDES[level]
 #        self.XYSCALE = tf.constant(cfg.XYSCALE,dtype=tf.float32)
         self.filters = 2**(6+level)
-        self.bbox_filters = self.NUM_ANCHORS * (self.NUM_CLASS + self.BBOX_CLASS + self.BBOX_REG + self.MASK)
+        self.bbox_filters = self.NUM_ANCHORS * (self.NUM_CLASS + self.BBOX_CLASS + self.BBOX_REG)
         self.ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[self.LEVELS, self.NUM_ANCHORS, 2])[level]
         self.emb_dim = cfg.EMB_DIM 
         
@@ -168,34 +338,8 @@ class CustomProposalLayer(tf.keras.layers.Layer):
     def call(self, predictions, embeddings = None):
         """ predictions: b x 4 x h x w x 6; embeddings: b x h x w x emb (=208) """
         """ proposals: b x MAX_PROP x (4+1+emb) where bb is in xyxy form"""
-        proposals = []
-        for i in range(cfg.LEVELS):
-            pred = predictions[i]
-            pconf = pred[..., 4:6]  # Conf
-            pconf = tf.nn.softmax(pconf, axis=-1)[...,1][...,tf.newaxis] # 1 is foreground
-            pbox = pred[..., :4]
-            pbox = decode_delta_map(pbox, self.ANCHORS[i]/self.STRIDES[i])
-            pbox *= self.STRIDES[i] # now in range [0, .... cfg.TRAIN_SIZE]
-            pbox /= self.TRAIN_SIZE #now normalized in [0...1]
-            pbox = xywh2xyxy(pbox) # to bbox
-            pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
-            preds = tf.concat([pbox, pconf], axis=-1)
-            
-            if embeddings:
-                pemb = embeddings[i]
-                pemb = tf.math.l2_normalize(tf.tile(pemb[:,tf.newaxis],(1,cfg.NUM_ANCHORS,1,1,1)), axis=-1, epsilon=1e-12)
-                preds = tf.concat([preds, pemb], axis=-1)
-                
-            proposal = tf.reshape(preds, [tf.shape(preds)[0], -1, tf.shape(preds)[-1]]) # b x nBB x (4 + 1 + 1 + 208) rois
-            proposal = tf.map_fn(check_proposals, proposal, fn_output_signature=tf.float32)
-            proposals.append(proposal)
-            
-        proposals = tf.concat(proposals,axis=1) #concat along levels
-        proposals = tf.map_fn(nms_proposals, proposals, fn_output_signature=tf.float32)
         
-        mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
-        proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
-        return proposals
+        return  proposal_graph(predictions, embeddings)
     
     def get_input_shape(self):
 #        return [tf.random.uniform((cfg.BATCH, cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.NUM_CLASS + 5)) for i in range(cfg.LEVELS)], [tf.random.uniform((cfg.BATCH, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
@@ -205,6 +349,28 @@ class CustomProposalLayer(tf.keras.layers.Layer):
         pred, emb = self.get_input_shape()
         return self.call(pred, emb).shape
 
+def proposal_graph(predictions, embeddings = None):
+    ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
+
+    p_2, p_3, p_4, p_5 = predictions
+      
+    d_2 = decode_prediction(p_2, ANCHORS[0], cfg.STRIDES[0])
+    
+    d_3 = decode_prediction(p_3, ANCHORS[1], cfg.STRIDES[1])
+    
+    d_4 = decode_prediction(p_4, ANCHORS[2], cfg.STRIDES[2])
+    
+    d_5 = decode_prediction(p_5, ANCHORS[3], cfg.STRIDES[3])
+        
+    proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels
+    
+    proposals = nms_proposals_tensor(proposals)
+    
+    # stop backpropagation for all zero boxes, this leads to nan gradient due to log decoding
+    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
+    proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
+    
+    return proposals
 ############################################################
 #  ROIAlign Layer
 ############################################################
@@ -292,157 +458,152 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     def get_output_shape(self):
         return [out.shape for out in self.call(self.get_input_shape())]
 
-#class PyramidROIAlign(tf.keras.layers.Layer):
-#    """Implements ROI Pooling on multiple levels of the feature pyramid.
-#    Params:
-#    - pool_shape: [pool_height, pool_width] of the output pooled regions. Usually [7, 7]
-#    Inputs:
-#    - boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized
-#             coordinates. Possibly padded with zeros if not enough
-#             boxes to fill the array.
-#    - image_meta: [batch, (meta data)] Image details. See compose_image_meta()
-#    - feature_maps: List of feature maps from different levels of the pyramid.
-#                    Each is [batch, height, width, channels]
-#    Output:
-#    Pooled regions in the shape: [batch, num_boxes, pool_height, pool_width, channels].
-#    The width and height are those specific in the pool_shape in the layer
-#    constructor.
-#    """
-#
-#    def __init__(self, pool_shape, **kwargs):
-#        super(PyramidROIAlign, self).__init__(**kwargs)
-#        self.pool_shape = tuple(pool_shape)
-#
-#    def call(self, boxes, feature_maps):
-#        # Crop boxes [batch, num_boxes, (y1, x1, y2, x2)] in normalized coords
-##        boxes = inputs[0]
-#
-#        # Image meta
-#        # Holds details about the image. See compose_image_meta()
-#        image_shape = (cfg.TRAIN_SIZE,cfg.TRAIN_SIZE)
-#
-#        # Feature Maps. List of feature maps from different level of the
-#        # feature pyramid. Each is [batch, height, width, channels]
-##        feature_maps = inputs[2:]
-#
-#        # Assign each ROI to a level in the pyramid based on the ROI area.
-#        y1, x1, y2, x2 = tf.split(boxes, 4, axis=2)
-#        h = y2 - y1
-#        w = x2 - x1
-#        # Use shape of first image. Images in a batch must have the same size.
-##        image_shape = parse_image_meta_graph(image_meta)['image_shape'][0]
-#        # Equation 1 in the Feature Pyramid Networks paper. Account for
-#        # the fact that our coordinatimage_metaes are normalized here.
-#        # e.g. a 224x224 ROI (in pixels) maps to P4
-#        image_area = tf.cast(image_shape[0] * image_shape[1], tf.float32)
-#        roi_level = log2_graph(tf.sqrt(h * w) / (224.0 / tf.sqrt(image_area)))
-#        roi_level = tf.minimum(5, tf.maximum(
-#            2, 4 + tf.cast(tf.round(roi_level), tf.int32)))
-#        roi_level = tf.squeeze(roi_level, 2)
-#
-#        # Loop through levels and apply ROI pooling to each. P2 to P5.
-#        pooled = []
-#        box_to_level = []
-#        for i, level in enumerate(range(2, 6)):
-#            ix = tf.where(tf.equal(roi_level, level))
-#            level_boxes = tf.gather_nd(boxes, ix)
-#
-#            # Box indices for crop_and_resize.
-#            box_indices = tf.cast(ix[:, 0], tf.int32)
-#
-#            # Keep track of which box is mapped to which level
-#            box_to_level.append(ix)
-#
-#            # Stop gradient propogation to ROI proposals
-#            level_boxes = tf.stop_gradient(level_boxes)
-#            box_indices = tf.stop_gradient(box_indices)
-#
-#            # Crop and Resize
-#            # From Mask R-CNN paper: "We sample four regular locations, so
-#            # that we can evaluate either max or average pooling. In fact,
-#            # interpolating only a single value at each bin center (without
-#            # pooling) is nearly as effective."
-#            #
-#            # Here we use the simplified approach of a single value per bin,
-#            # which is how it's done in tf.crop_and_resize()
-#            # Result: [batch * num_boxes, pool_height, pool_width, channels]
-#            pooled.append(tf.image.crop_and_resize(
-#                feature_maps[i], level_boxes, box_indices, self.pool_shape,
-#                method="bilinear"))
-#
-#        # Pack pooled features into one tensor
-#        pooled = tf.concat(pooled, axis=0)
-#
-#        # Pack box_to_level mapping into one array and add another
-#        # column representing the order of pooled boxes
-#        box_to_level = tf.concat(box_to_level, axis=0)
-#        box_range = tf.expand_dims(tf.range(tf.shape(box_to_level)[0]), 1)
-#        box_to_level = tf.concat([tf.cast(box_to_level, tf.int32), box_range],
-#                                 axis=1)
-#
-#        # Rearrange pooled features to match the order of the original boxes
-#        # Sort box_to_level by batch then box index
-#        # TF doesn't have a way to sort by two columns, so merge them and sort.
-#        sorting_tensor = box_to_level[:, 0] * 100000 + box_to_level[:, 1]
-#        ix = tf.nn.top_k(sorting_tensor, k=tf.shape(
-#            box_to_level)[0]).indices[::-1]
-#        ix = tf.gather(box_to_level[:, 2], ix)
-#        pooled = tf.gather(pooled, ix)
-#
-#        # Re-add the batch dimension
-#        shape = tf.concat([tf.shape(boxes)[:2], tf.shape(pooled)[1:]], axis=0)
-#        pooled = tf.reshape(pooled, shape)
-#        return pooled
-#
-#    def get_input_boxes_shape(self):
-#        return tf.zeros((cfg.BATCH, cfg.MAX_PROP, 4))
-#    
-#    def get_input_features_shape(self):
-#        return [tf.zeros(shape=(cfg.BATCH, cfg.TRAIN_SIZE//cfg.STRIDES[i],cfg.TRAIN_SIZE//cfg.STRIDES[i], 
-#                                        cfg.EMB_DIM)) for i in range(cfg.LEVELS)]
-#    def get_output_shape(self):
-#        return self.call(self.get_input_boxes_shape(), self.get_input_features_shape()).shape
+class BatchNorm(tf.keras.layers.BatchNormalization):
+    """Extends the Keras BatchNormalization class to allow a central place
+    to make changes if needed.
+    Batch normalization has a negative effect on training if batches are small
+    so this layer is often frozen (via setting in Config class) and functions
+    as linear layer.
+    """
+    def call(self, inputs, training=None):
+        """
+        Note about training values:
+            None: Train BN layers. This is the normal mode
+            False: Freeze BN layers. Good when batch size is small
+            True: (don't use). Set layer in training mode even when making inferences
+        """
+        return super(self.__class__, self).call(inputs, training=training)
 
-#        
-#class ROIAlignLayer(tf.keras.layers.Layer):
-#    """ Implements Region Of Interest Max Pooling 
-#        for channel-first images and relative bounding box coordinates
-#        
-#        # Constructor parameters
-#            align_height, align_width (int) -- 
-#              specify height and width of layer outputs
-#        
-#        Shape of inputs
-#            [(batch_size, align_height, align_width, n_channels),
-#             (batch_size, num_rois, 4)]
-#           
-#        Shape of output
-#            (batch_size * num_rois, align_height, align_width, n_channels)
-#    
-#    """
-#    def __init__(self, align_height, align_width, **kwargs):
-#        super(ROIAlignLayer, self).__init__(**kwargs)
-#        self.align_height = align_height
-#        self.align_width = align_width
-#        
-#    def call(self, feature_map, rois):
-#        """ Maps the input tensor of the ROI layer to its output
-#        
-#            # Parameters
-#                feature_map -- Convolutional feature map tensor,
-#                        shape (batch_size, align_height, align_width, n_channels)
-#                rois -- Tensor of region of interests from candidate bounding boxes,
-#                        shape (batch_size, num_rois, 4)
-#                        Each region of interest is defined by four relative 
-#                        coordinates (x_min, y_min, x_max, y_max) between 0 and 1
-#            # Output
-#                aligned features -- Tensor with the pooled region of interest, shape
-#                    (batch_size * num_rois, align_height, align_width, n_channels)
-#        """
-#        batch_size, num_rois, _ = rois.shape
-#        box_indices = tf.repeat(tf.range(0,batch_size,1, tf.int32), num_rois)
-#        rois = tf.reshape(rois, (-1,4))
-#        crop_size = (self.align_height, self.align_width)
-#        return tf.image.crop_and_resize(feature_map, rois, box_indices=box_indices,
-#                                        crop_size=crop_size, method='bilinear')
+def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=1024):
+    """Builds the computation graph of the feature pyramid network classifier
+    and regressor heads.
+    rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
+          coordinates.
+    feature_maps: List of feature maps from different layers of the pyramid,
+                  [P2, P3, P4, P5]. Each has a different resolution.
+    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    pool_size: The width of the square feature map generated from ROI Pooling.
+    num_classes: number of classes, which determines the depth of the results
+    train_bn: Boolean. Train or freeze Batch Norm layers
+    fc_layers_size: Size of the 2 FC layers
+    Returns:
+        logits: [batch, num_rois, NUM_CLASSES] classifier logits (before softmax)
+        probs: [batch, num_rois, NUM_CLASSES] classifier probabilities
+        bbox_deltas: [batch, num_rois, NUM_CLASSES, (dx, dy, log(dw), log(dh))] Deltas to apply to
+                     proposal boxes
+    """
+#    rois, feature_maps = inputs[0], inputs[1]
+    # ROI Pooling
+    # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
+    x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_classifier")(inputs)
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp2_gn')(x2)
+    x2 = tf.keras.layers.Activation('relu', name='roi_class_afp2_gn_relu')(x2)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp3_gn')(x3)
+    x3 = tf.keras.layers.Activation('relu', name='roi_class_afp3_gn_relu')(x3)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp4_gn')(x4)
+    x4 = tf.keras.layers.Activation('relu', name='roi_class_afp4_gn_relu')(x4)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp5_gn')(x5)
+    x5 = tf.keras.layers.Activation('relu', name='roi_class_afp5_gn_relu')(x5)
 
+    x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv1")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv1_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv1_gn_relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv2")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv2_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv2_gn_relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv3")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv3_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv3_gn_relu')(x)
+
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
+                           name="mrcnn_class_shared")(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
+    shared = tf.keras.layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name="pool_squeeze")(x)
+    # Classifier head
+    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes),
+                                            name='mrcnn_class_logits')(shared)
+    # kernel_regularizer=tf.keras.regularizers.L1(0.01),
+    # activity_regularizer=tf.keras.regularizers.L2(0.01)
+    mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),
+                                     name="mrcnn_class")(mrcnn_class_logits)
+
+    # BBox head
+    # [batch, num_rois, NUM_CLASSES * (dx, dy, log(dw), log(dh))]
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes * 4, activation='linear'),
+                           name='mrcnn_bbox_fc')(shared)
+    # kernel_regularizer=tf.keras.regularizers.L1(0.01),
+    # activity_regularizer=tf.keras.regularizers.L2(0.01)
+    mrcnn_bbox = tf.keras.layers.Reshape((x.shape.as_list()[1], num_classes, 4), name="mrcnn_bbox")(x)
+
+    return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
+
+def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=2):
+    """Builds the computation graph of the mask head of Feature Pyramid Network.
+    rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
+          coordinates.
+    feature_maps: List of feature maps from different layers of the pyramid,
+                  [P2, P3, P4, P5]. Each has a different resolution.
+    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    pool_size: The width of the square feature map generated from ROI Pooling.
+    num_classes: number of classes, which determines the depth of the results
+    train_bn: Boolean. Train or freeze Batch Norm layers
+    Returns: Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
+    """
+#    rois, feature_maps = inputs[0], inputs[1]
+    # ROI Pooling
+    # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
+    x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_mask")(inputs)
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp2_gn')(x2)
+    x2 = tf.keras.layers.Activation('relu', name='roi_mask_afp2_gn_relu')(x2)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp3_gn')(x3)
+    x3 = tf.keras.layers.Activation('relu', name='roi_mask_afp3_gn_relu')(x3)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp4_gn')(x4)
+    x4 = tf.keras.layers.Activation('relu', name='roi_mask_afp4_gn_relu')(x4)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp5_gn')(x5)
+    x5 = tf.keras.layers.Activation('relu', name='roi_mask_afp5_gn_relu')(x5)
+
+    x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv1")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn1')(x)
+    x = tf.keras.layers.Activation('relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv2")(x)
+    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn2')(x)
+    shared = tf.keras.layers.Activation('relu')(x)
+
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv3")(shared)
+    x_fcn = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn3')(x_fcn)
+    x_fcn = tf.keras.layers.Activation('relu')(x_fcn)
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2DTranspose(cfg.EMB_DIM, (2, 2), strides=(2, 2), activation="relu"),
+                           name="mrcnn_mask_deconv")(x_fcn)
+
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv4")(shared)
+    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn4')(x_ff)
+    x_ff = tf.keras.layers.Activation('relu')(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM//2, (3, 3), padding="same"),
+                              name="mrcnn_mask_conv5")(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn5')(x_ff)
+    x_ff = tf.keras.layers.Activation('relu')(x_ff)
+    x_ff_shape = x_ff.shape.as_list()
+    x_ff = tf.keras.layers.Reshape((x_ff_shape[1], x_ff_shape[2]*x_ff_shape[3]*x_ff_shape[4]))(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(pool_size*pool_size*2*2, activation='relu'), name='mrcnn_mask_fc')(x_ff)
+
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(num_classes, (1, 1), strides=1), name="mrcnn_mask_fcn")(x_fcn)
+    x_ff = tf.keras.layers.Reshape((x_ff_shape[1], pool_size*2, pool_size*2, 1))(x_ff)
+    x_ff = tf.keras.layers.Lambda(lambda x: tf.tile(x, (1, 1, 1, 1, num_classes)))(x_ff)
+    x = tf.keras.layers.Add()([x_fcn, x_ff])
+    x = tf.keras.layers.Activation('sigmoid', name='mrcnn_mask')(x)
+
+    return x
