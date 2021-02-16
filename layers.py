@@ -371,6 +371,7 @@ def proposal_graph(predictions, embeddings = None):
     proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
     
     return proposals
+
 ############################################################
 #  ROIAlign Layer
 ############################################################

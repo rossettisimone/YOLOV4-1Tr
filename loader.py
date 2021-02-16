@@ -34,7 +34,7 @@ class Generator(object):
             image, masks, bboxes = self.data_augment(image, masks, bboxes)
         image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
 #        masks, bboxes = self.data_pad(masks, bboxes)
-        label_2, label_3, label_4, label_5 = self.data_labels(bboxes)
+        label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
         masks = self.masks_preprocess(masks, bboxes)
         masks, bboxes = self.data_pad(masks, bboxes)
         inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
@@ -50,7 +50,7 @@ class Generator(object):
         [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
         image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-        label_2, label_3, label_4, label_5 = self.data_labels(bboxes)
+        label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
         masks = self.masks_preprocess(masks, bboxes)
         masks, bboxes = self.data_pad(masks, bboxes)
         inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
@@ -85,7 +85,10 @@ class Generator(object):
     def masks_preprocess(self, masks, bboxes):
         masks_resized = []
         for mask, bbox in zip(masks, bboxes):
-            mask = Image.fromarray(mask[bbox[1]:bbox[3],bbox[0]:bbox[2]])
+            try:
+                mask = Image.fromarray(mask[bbox[1]:bbox[3],bbox[0]:bbox[2]])
+            except:
+                mask = Image.fromarray(mask)
             mask = mask.resize((cfg.MASK_SIZE,cfg.MASK_SIZE), Image.ANTIALIAS)
             mask = np.clip(mask,0,1)
             mask = np.round(mask)
@@ -138,24 +141,28 @@ class Generator(object):
                 # assert np.isfinite(p_id), 'nan values in p_id'
                 box = np.round(np.r_[box,1]*np.array([width, height, width, height, p_id]))
                 if box[2]>box[0] and box[3]>box[1]:
-                    bboxes.append(box)
                     try:
                         path_mask = os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' )
                         mask = np.array(read_image(path_mask))
                         m_height, m_width = mask.shape[0], mask.shape[1]
                         assert m_height == height and m_width == width, 'inconsistent dimensions'
                         mask = mask_clamp(mask)
-                        # assert np.isfinite(mask).all(), 'nan values in mask'
-                    except Exception as e:
-#                        print(e)
-                        mask = np.array(Image.new('L', (width, height), color=0))
-                    masks.append(mask)
-            bboxes = np.stack(bboxes,axis=0)
-            masks = np.stack(masks,axis=0)
+                        if np.any(mask):
+                            bboxes.append(box)
+                            masks.append(mask)
+                    except:
+                        continue
+            if len(bboxes)==0:
+                bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.float32) # bbox + pid
+                masks = np.zeros((cfg.MAX_INSTANCES, image.shape[0], image.shape[1]), dtype=np.float32)
+            else:
+                bboxes = np.stack(bboxes,axis=0)
+                masks = np.stack(masks,axis=0)
         except:
             image = np.array(Image.new('RGB', (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), color = (0, 0, 0)))
             bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.float32) # bbox + pid
             masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.float32)
+            
         return image, masks, bboxes
 
     def data_augment(self, image, masks, bboxes):
@@ -164,10 +171,10 @@ class Generator(object):
         image, masks, bboxes = self.random_translate(image, masks, bboxes)
         return image, masks, bboxes
     
-    def data_labels(self, bboxes):
+    def data_labels(self, bboxes, masks):
         labels = []
         for level in range(cfg.LEVELS):
-            label = encode_target(bboxes, self.anchors[level]/self.strides[level], cfg.NUM_ANCHORS, self.num_classes, self.train_output_sizes[level], self.train_output_sizes[level])
+            label = encode_target(bboxes, masks, self.anchors[level]/self.strides[level], cfg.NUM_ANCHORS, self.num_classes, self.train_output_sizes[level], self.train_output_sizes[level])
             labels.append(label)
         return labels
         
