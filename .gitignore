@@ -12,4 +12,11 @@ config.py
 weights_old/
 /2021*
 2021*
-*.json
+pictures/
+/pictures
+other/
+/other
+__pycache__
+keyframes/
+/keyframes
+keyframes

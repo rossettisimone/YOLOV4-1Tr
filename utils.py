@@ -12,12 +12,11 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 import numpy as np
 import config as cfg
 import tensorflow as tf
-import matplotlib.pyplot as plt
-import random
 from compute_ap import compute_ap_range
+import skimage.transform
 
 def filter_inputs(image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes):
-    return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0.0) and tf.greater(tf.reduce_sum(gt_masks), 0.0)
+    return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
 
 def file_reader(file_name):
     with open(file_name) as json_file:
@@ -67,19 +66,19 @@ def img_tranfrom(img, bbox):
 
 def read_image(img_path):
     return Image.open(img_path)
-
-def scale_coords(img_size, coords, img0_shape):
-    # Rescale x1, y1, x2, y2 from 416 to image size
-    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
-    gain_h = float(img_size[1]) / img0_shape[0]
-    gain = min(gain_w, gain_h)
-    pad_x = (img_size[0] - img0_shape[1] * gain) / 2  # width padding
-    pad_y = (img_size[1] - img0_shape[0] * gain) / 2  # height padding
-    coords[:, [0, 2]] -= pad_x
-    coords[:, [1, 3]] -= pad_y
-    coords[:, 0:4] /= gain
-    coords[:, :4] = np.clip(coords[:, :4], min=0)
-    return coords
+#
+#def scale_coords(img_size, coords, img0_shape):
+#    # Rescale x1, y1, x2, y2 from 416 to image size
+#    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
+#    gain_h = float(img_size[1]) / img0_shape[0]
+#    gain = min(gain_w, gain_h)
+#    pad_x = (img_size[0] - img0_shape[1] * gain) / 2  # width padding
+#    pad_y = (img_size[1] - img0_shape[0] * gain) / 2  # height padding
+#    coords[:, [0, 2]] -= pad_x
+#    coords[:, [1, 3]] -= pad_y
+#    coords[:, 0:4] /= gain
+#    coords[:, :4] = np.clip(coords[:, :4], min=0)
+#    return coords
 
 #
 def bbox_iou(box1, box2, x1y1x2y2=False):
@@ -112,6 +111,10 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
     b2_area = tf.broadcast_to(tf.reshape((b2_x2 - b2_x1) * (b2_y2 - b2_y1),(1,-1)),[N,M])
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
+
+def entry_stop_gradients(target, mask):
+    mask_h = tf.abs(mask-1)
+    return tf.stop_gradient(mask_h * target) + mask * target
 
 def decode_proposal(proposal, mode='cut'):
     bbox = proposal[...,:4]
@@ -179,7 +182,7 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     nB = tf.shape(image)[0]
     mean_AP = []
-    if len(prediction)>3: # if masks are present
+    if len(prediction)>3: # if masks are present TODO
         preds, embs, proposals, logits, probs, bboxes, masks = prediction
         for i in range(nB):
             gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
@@ -191,18 +194,15 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
                 mean_AP.append(AP)
     if len(mean_AP) == 0: # this is never the case, but better to exclude the situation
         mean_AP = [0.5]
-    return np.mean(mean_AP)
-#    else:
-#        preds, embs, proposals = prediction
-#        for i in range(nB):
-            
+    return np.mean(mean_AP)            
     
 def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
     colors = []
     for name, code in ImageColor.colormap.items():
          colors.append(name)
 #    random.shuffle(colors)
-    img = Image.fromarray(np.array(image.numpy()*255,dtype=np.uint8))                   
+    bboxs = bboxs[...,:4]
+    img = Image.fromarray(np.array(image*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   
     if np.any(conf_id is None):
         conf_id = tf.zeros_like(bboxs)[...,0]
@@ -212,24 +212,50 @@ def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
                 draw.rectangle(bbox, outline = colors[i%len(colors)]) 
                 xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
                 draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"), fontsize = 15, fill=colors[i%len(colors)])
- 
     img = np.array(img)
     if np.any(masks is not None):
         masks = np.transpose(masks,(2,0,1))
         for i, (mask, bbox) in enumerate(zip(masks, bboxs)):
-            mask = Image.fromarray(mask)
             xyxy = np.array(bbox,dtype=np.int32)
-            wh = np.array(bbox[2:4]-bbox[:2],dtype=np.int32)
-            if np.all(wh>0):
-                mask = np.round(mask.resize((wh[0], wh[1]),Image.ANTIALIAS))
-                mask = np.array(Image.new('RGB', (wh[0], wh[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
-                img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]][mask>0] = img[xyxy[1]:xyxy[3],xyxy[0]:xyxy[2]][mask>0]*0.5+mask[mask>0]*0.5
+            if np.any(xyxy>0):
+                mask = unmold_mask(mask, xyxy, img.shape)
+                mask = np.array(Image.new('RGB', (img.shape[0], img.shape[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
+                img[mask>0] = img[mask>0]*0.5+mask[mask>0]*0.5
     if mode == 'PIL':
         show_image(img)
     else:
         return img
 
+def unmold_mask(mask, bbox, image_shape):
+    """Converts a mask generated by the neural network to a format similar
+    to its original shape.
+    mask: [height, width] of type float. A small, typically 28x28 mask.
+    bbox: [y1, x1, y2, x2]. The box to fit the mask in.
+    Returns a binary mask with the same size as the original image.
+    """
+    threshold = 0.5
+    x1, y1, x2, y2 = bbox
+    mask = resize(mask, (y2 - y1, x2 - x1))
+    mask = np.where(mask >= threshold, 1, 0).astype(np.bool)
+    # Put the mask in the right location.
+    full_mask = np.zeros(image_shape[:2], dtype=np.bool)
+    full_mask[y1:y2, x1:x2] = mask
+    return full_mask
 
+def resize(image, output_shape, order=1, mode='constant', cval=0, clip=True,
+           preserve_range=False, anti_aliasing=False, anti_aliasing_sigma=None):
+    """A wrapper for Scikit-Image resize().
+    Scikit-Image generates warnings on every call to resize() if it doesn't
+    receive the right parameters. The right parameters depend on the version
+    of skimage. This solves the problem by using different parameters per
+    version. And it provides a central place to control resizing defaults.
+    """
+    return skimage.transform.resize(
+        image, output_shape,
+        order=order, mode=mode, cval=cval, clip=clip,
+        preserve_range=preserve_range, anti_aliasing=anti_aliasing,
+        anti_aliasing_sigma=anti_aliasing_sigma)
+        
 def show_image(img):
     img = Image.fromarray(img)               
     img.show()
@@ -251,8 +277,97 @@ def xywh2xyxy(xywh):
     x2y2 = xywh[...,:2] + xywh[...,2:4]*0.5
     return tf.concat([x1y1, x2y2], axis=-1)
 
+#def encode_target(target,masks, anchor_wh, nA, nC, nGh, nGw):
+#    target = tf.cast(target, tf.float32)
+#    bbox = target[:,:4]/cfg.TRAIN_SIZE
+#    ids = target[:,4]
+#    
+#    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
+#    gt_boxes = xyxy2xywh(bbox)
+#    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
+#    anchor_wh = tf.cast(anchor_wh, tf.float32)
+#    tbox = tf.zeros((nA, nGh, nGw, 4))
+#    tconf = tf.zeros(( nA, nGh, nGw))
+#    tid = tf.zeros((nA, nGh, nGw, nC))-1
+#    
+#    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
+#    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
+#    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
+#    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
+#    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+#    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+#    
+#    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
+#    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
+#    
+#    id_index = iou_map > cfg.ID_THRESH
+#    fg_index = iou_map > cfg.FG_THRESH                                                    
+#    bg_index = iou_map < cfg.BG_THRESH 
+#    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
+#                        * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
+#    tconf = tf.where(fg_index, 1.0, tconf)
+#    tconf = tf.where(bg_index, 0.0, tconf)
+#    tconf = tf.where(ign_index, -1.0, tconf)
 #
-def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
+#    gt_index = tf.boolean_mask(gt_index_map,fg_index)
+#    gt_box_list = tf.gather(gt_boxes,gt_index)
+#    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
+#
+#    if tf.reduce_sum(tf.cast(fg_index,tf.float32)) > 0:
+#        tid = tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC))
+#        tid = tf.where(tf.equal(tid,0.0),  -1.0, tid)
+#        fg_anchor_list = anchor_mesh[fg_index] 
+#        delta_target = encode_delta(gt_box_list, fg_anchor_list)
+#        tbox = tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4))
+#        
+#    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
+#    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
+#    label = tf.transpose(label,(0,2,1,3))
+#    return label
+
+def decode_label(label, anchors, stride):
+    label = tf.transpose(label,(0,1,3,2,4)) # decode_delta_map has some issue
+    pconf = label[..., 4]  # Conf
+    pbox = label[..., :4]
+    pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
+    pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
+    pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
+    pbox = xywh2xyxy(pbox) # to bbox
+    pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
+    proposal = tf.concat([pbox, pconf[...,tf.newaxis]], axis=-1) 
+    nB = tf.shape(proposal)[0]
+    _, nA, nGh, nGw, nC = proposal.shape       
+    proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC]) # b x nBB x (4 + 1 + 1 + 208) rois
+    proposal = check_proposals_tensor(proposal)
+    return proposal
+
+def decode_labels(predictions, embeddings = None):
+    ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
+    p_2, p_3, p_4, p_5 = predictions      
+    d_2 = decode_label(p_2, ANCHORS[0], cfg.STRIDES[0])    
+    d_3 = decode_label(p_3, ANCHORS[1], cfg.STRIDES[1])    
+    d_4 = decode_label(p_4, ANCHORS[2], cfg.STRIDES[2])    
+    d_5 = decode_label(p_5, ANCHORS[3], cfg.STRIDES[3])
+    
+    proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels    
+    proposals = nms_proposals_tensor(proposals)    
+    
+    proposals = proposals * tf.tile(proposals[...,4][...,None],(1,1,tf.shape(proposals)[-1]))
+    return proposals
+
+def encode_target(target, masks, anchor_wh, nA, nC, nGh, nGw):
+    
+    masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
+                            preserve_aspect_ratio=True, antialias=True)[...,0]
+
+    masks = tf.round(masks)
+    masks = tf.clip_by_value(masks,0,1)
+#    all_non_zero_mask = tf.tile(tf.greater(tf.reduce_sum(masks, axis=[1,2]),0)[...,None,None],(1,nGh,nGw))
+#    masks = tf.where(all_non_zero_mask, masks, tf.ones_like(masks))
+    masks = tf.transpose(masks, (0,2,1))
+    masks = tf.clip_by_value(tf.reduce_sum(masks,axis=0),0,1)
+    masks = tf.tile(tf.cast(masks, tf.bool)[None],(nA,1,1))
+
     target = tf.cast(target, tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
     ids = target[:,4]
@@ -261,23 +376,25 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
     gt_boxes = xyxy2xywh(bbox)
     gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
     anchor_wh = tf.cast(anchor_wh, tf.float32)
-    tbox = tf.zeros((nA, nGh, nGw, 4)) # batch size, anchors, grid size
+    tbox = tf.zeros((nA, nGh, nGw, 4))
     tconf = tf.zeros(( nA, nGh, nGw))
     tid = tf.zeros((nA, nGh, nGw, nC))-1
     
-    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)
-    anchor_list = tf.reshape(tf.transpose(anchor_mesh, (0,2,3,1)),(-1, 4))              # Shpae (nA x nGh x nGw) x 4 
-    iou_pdist = bbox_iou(anchor_list, gt_boxes)                                      # Shape (nA x nGh x nGw) x Ng
-    iou_max = tf.math.reduce_max(iou_pdist, axis=1)                              # Shape (nA x nGh x nGw), both
-    max_gt_index = tf.math.argmax(iou_pdist, axis=1)
+    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
+    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
+    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
+    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
+    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
     
     iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
     
-    id_index = iou_map > cfg.ID_THRESH
-    fg_index = iou_map > cfg.FG_THRESH                                                    
-    bg_index = iou_map < cfg.BG_THRESH 
-    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
+    id_index = tf.logical_and(iou_map > cfg.ID_THRESH, masks)
+    fg_index = tf.logical_and(iou_map > cfg.FG_THRESH, masks)                                                 
+    bg_index = tf.logical_and(iou_map < cfg.BG_THRESH, tf.logical_not(masks))
+    ign_index = tf.logical_and(tf.logical_and(iou_map < cfg.FG_THRESH, iou_map > cfg.BG_THRESH), tf.logical_not(masks))
+    
     tconf = tf.where(fg_index, 1.0, tconf)
     tconf = tf.where(bg_index, 0.0, tconf)
     tconf = tf.where(ign_index, -1.0, tconf)
@@ -289,26 +406,15 @@ def encode_target(target, anchor_wh, nA, nC, nGh, nGw):
     if tf.reduce_sum(tf.cast(fg_index,tf.float32)) > 0:
         tid = tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC))
         tid = tf.where(tf.equal(tid,0.0),  -1.0, tid)
-        fg_anchor_list = tf.reshape(anchor_list,(nA, nGh, nGw, 4))[fg_index] 
+        fg_anchor_list = anchor_mesh[fg_index] 
         delta_target = encode_delta(gt_box_list, fg_anchor_list)
         tbox = tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4))
-#    tconf = tf.transpose(tconf,(0,2,1))
-#    tbox = tf.transpose(tbox,(0,2,1,3))
-#    tid = tf.transpose(tid,(0,2,1,3))
-#    tconf, tbox, tid = tf.cast(tconf,tf.float32), tf.cast(tbox,tf.float32), tf.cast(tid,tf.float32)
+        
     label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
+    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
     label = tf.transpose(label,(0,2,1,3))
     return label
 
-
-
-#def true_proposals_deltas(deltas):
-#    condition = tf.logical_and(tf.greater(proposals[...,3],proposals[...,1]),tf.greater(proposals[...,2],proposals[...,0]))
-#    valid_indices = tf.squeeze(tf.where(condition),axis=-1)
-#    proposals = tf.gather(proposals,valid_indices)
-#    return proposals
-
-#
 def generate_anchor(nGh, nGw, anchor_wh):
     nA = tf.shape(anchor_wh)[0]
     yy, xx =tf.meshgrid(tf.range(nGh), tf.range(nGw))
@@ -318,7 +424,6 @@ def generate_anchor(nGh, nGw, anchor_wh):
     anchor_mesh = tf.concat([mesh, anchor_offset_mesh], axis=1)                       # Shape nA x 4 x nGh x nGw
     return anchor_mesh
 
-#
 def encode_delta(gt_box_list, fg_anchor_list):
     '''
     :param: gt_box_list, shape (num_boxes, (gx, gy, gw, gh))
@@ -369,6 +474,23 @@ def decode_delta_map(delta_map, anchors):
     pred_list = decode_delta(tf.reshape(delta_map,(-1,4)), tf.reshape(anchor_mesh,(-1,4)))
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
+    
+def decode_prediction(prediction, anchors, stride):
+    prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
+    pconf = prediction[..., 4:6]  # Conf
+    pconf = tf.nn.softmax(pconf, axis=-1)[...,1] # 1 is foreground
+    pbox = prediction[..., :4]
+    pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
+    pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
+    pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
+    pbox = xywh2xyxy(pbox) # to bbox
+    pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
+    proposal = tf.concat([pbox, pconf[...,tf.newaxis]], axis=-1) 
+    nB = tf.shape(proposal)[0]
+    _, nA, nGh, nGw, nC = proposal.shape       
+    proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC]) # b x nBB x (4 + 1 + 1 + 208) rois
+    proposal = check_proposals_tensor(proposal)
+    return proposal
 
 def best_sort_batch(proposal):
     nB = tf.shape(proposal)[0]
@@ -395,45 +517,31 @@ def best_sort_batch(proposal):
     return proposal
 
 def check_proposals_tensor(proposal):
-    # indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
-    # proposal = tf.gather(proposal,indices)
-
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
+    """This function remove unconsistent bboxes: x2>x1 and y2>y1 or with bad ratio 
+         and sort the proposals by score without iterating over the batch """
     
-    # remove unconsistent bboxes; x2>x1 and y2>y1
+    nC = tf.shape(proposal)[2]
     width = proposal[...,2] - proposal[...,0]
     height = proposal[...,3] - proposal[...,1]
     
     mask_dim = tf.logical_and(tf.greater(width, cfg.MIN_BOX_DIM), tf.greater(height, cfg.MIN_BOX_DIM))
-    mask_ratio = tf.logical_and(tf.greater(width/height, cfg.MIN_BOX_RATIO),\
-        tf.greater(height/width, cfg.MIN_BOX_RATIO))
+    mask_ratio = tf.logical_and(tf.greater(tf.divide(width,height), cfg.MIN_BOX_RATIO),\
+        tf.greater(tf.divide(height,width), cfg.MIN_BOX_RATIO))
     mask = tf.logical_and(mask_dim,mask_ratio)
     
-    indices = tf.tile(tf.cast(mask, tf.float32)[...,None],(1,1,5))
-    proposal = proposal * indices
+    indices = tf.tile(tf.cast(mask, tf.float32)[...,tf.newaxis],(1,1,nC))
+    proposal = tf.multiply(proposal, indices) # remove the bad proposals
     
-    proposal = best_sort_batch(proposal)
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
-    
+    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable=True)
 
-    
-    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP), axis=1) # automatic zero padding
-
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0) # needed if cfg.MAX_PROP is high value
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
-#    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposal[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
-#    proposal = entry_stop_gradients(proposal, mask_non_zero_entry)
+    proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
+    k_proposal = tf.range(cfg.MAX_PROP)
+    k_proposal = tf.stop_gradient(k_proposal)
+    proposal = tf.gather(proposal, k_proposal, axis=1) # automatic zero padding
     return proposal
 
-def check_proposals(proposal):
-    # indices = tf.squeeze(tf.where(tf.greater(proposal[..., 4],cfg.CONF_THRESH)),axis=1)
-    # proposal = tf.gather(proposal,indices)
 
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
-    
+def check_proposals(proposal):
     # remove unconsistent bboxes; x2>x1 and y2>y1
     width = proposal[...,2] - proposal[...,0]
     height = proposal[...,3] - proposal[...,1]
@@ -444,22 +552,26 @@ def check_proposals(proposal):
     mask = tf.logical_and(mask_dim,mask_ratio)
     
     indices = tf.squeeze(tf.where(mask),axis=-1)
-    proposal = tf.gather(proposal,indices)
+    proposal = tf.gather(proposal,indices, axis=0)
 
     # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
     # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
     
     indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING')
-    proposal = tf.gather(proposal,indices)
+    proposal = tf.gather(proposal,indices, axis=0)
     
-    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP)) # automatic zero padding
-    
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0) # needed if cfg.MAX_PROP is high value
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0) # useless
-#    mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposal[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
-#    proposal = entry_stop_gradients(proposal, mask_non_zero_entry)
-    return proposal
+    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP), axis=0) # automatic zero padding only on GPU
 
+    return proposal
+    
+def nms_proposals_tensor(proposal):
+    """This function compute nms proposals without iterating over the batch """
+    proposal, conf, *_ = tf.image.combined_non_max_suppression(
+            proposal[...,:4][:,:,tf.newaxis,:], proposal[...,4][...,tf.newaxis], max_output_size_per_class=cfg.MAX_PROP, \
+            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+
+    proposal = tf.concat([proposal,conf[...,tf.newaxis]], axis=-1)    
+    return proposal
 
 def nms_proposals(proposal):
     # non max suppression
@@ -469,9 +581,6 @@ def nms_proposals(proposal):
     
     proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP)) # automatic zero padding
 
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
-        
     return proposal
 
 def preprocess_target_bbox(proposal_gt_bbox):
@@ -523,18 +632,6 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
      target_class_ids: [batch, num_rois]. Integer class IDs.
      target_masks: [batch, num_rois, height, width].
         A float32 tensor of values 0 or 1. """
-#    proposals_1 = tf.random.uniform((2,10,2))*0.5
-#    proposals_2 = tf.random.uniform((2,10,2))*0.5 + 0.5
-#    proposals = tf.concat([proposals_1, proposals_2], axis=-1)
-#    bad_proposals = tf.zeros((2,10,4))
-#    proposals = tf.concat([proposals, bad_proposals], axis=1)
-#    gt_bboxes_1 = tf.random.uniform((2,5,2))*0.5
-#    gt_bboxes_2 = tf.random.uniform((2,5,2))*0.5 + 0.5
-#    gt_bboxes = tf.concat([gt_bboxes_1, gt_bboxes_2], axis=-1)* cfg.TRAIN_SIZE
-#    gt_masks = tf.round(tf.random.uniform((2,5,28,28)))
-#    proposals = tf.zeros((2,20,4))
-#    gt_bboxes = tf.zeros((2,10,4))
-#    gt_masks = tf.zeros((2,10,28,28))
     gt_bboxes = gt_bboxes[...,:4]
     gt_bboxes /= cfg.TRAIN_SIZE
     gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
@@ -549,13 +646,8 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     target_class_ids = tf.stop_gradient(target_class_ids)
     target_bbox = tf.stop_gradient(target_bbox)
     target_masks = tf.stop_gradient(target_masks)
-#    pred_class_logits = -tf.stack([tf.concat([-tf.ones((2,10)),-tf.ones((2,10))],axis=-1),tf.concat([tf.ones((2,10)),tf.ones((2,10))],axis=-1)],axis=-1)*10
-#    pred_bbox = tf.tile(target_bbox[:,:,None,:],(1,1,2,1))
-#    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,2))
-#    active_class_ids = tf.stop_gradient(active_class_ids)
-    #decode_delta(encoded_delta, valid_proposals)
 
-    return target_class_ids, target_bbox, target_masks #, active_class_ids
+    return target_class_ids, target_bbox, target_masks
 
 
 def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
@@ -673,8 +765,3 @@ def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
 
     loss = tf.reduce_mean(loss)
     return loss
-
-
-def entry_stop_gradients(target, mask):
-    mask_h = tf.abs(mask-1)
-    return tf.stop_gradient(mask_h * target) + mask * target
