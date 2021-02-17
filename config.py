@@ -1,4 +1,6 @@
 GPU = '0'
+#GPU = '0,1,2,3'
+
 DATASET_TYPE = 'ava'
 
 # AVA_path 
@@ -7,12 +9,17 @@ SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/
 TRAIN_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 
+#VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
+#SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
+#TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
+#VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+
 MIN_BOX_DIM = 0.05
 MIN_BOX_RATIO = 0.2
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 4
+BATCH = 8 * len(GPU.split(','))
 TRAIN_SIZE = 416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 20
@@ -26,21 +33,11 @@ IOU_THRESH = 0.5
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20
-import numpy as np
 
 ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
            27,  82,  57, 165, 102, 209, 181, 235,
            41, 124,  86, 248, 154, 313, 272, 353,
            55, 165, 114, 331, 205, 418, 363, 470]
-
-#
-#np.array([4,12, 6,22, 8,37, 11,20, 
-#           24,96, 29,64, 33,109, 38,85, 
-#           91,227, 96,124, 111,182, 123,239, 
-#           293,403, 333,488, 396,412, 438, 491])
-#
-#ANCHORS = ANCHORS/416*TRAIN_SIZE
-#ANCHORS = np.array(ANCHORS, np.int32)
 
 # [   4,   10,    6,   21,    9,   35,   13,   53,   30,   42,   39,
 #          76,   40,  127,   50,  227,  114,  203,  134,  130,  134,  286,

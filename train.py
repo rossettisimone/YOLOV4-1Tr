@@ -31,10 +31,6 @@ else:
 from models import MSDS
 from loader import DataLoader 
 
-ds = DataLoader(shuffle=True, data_aug=True)
-model = MSDS(data_loader = ds, emb = False, mask = True)
-model.custom_build()
-model.summary()
 
 #_________________________________________________________________
 #Layer (type)                 Output Shape              Param #   
@@ -58,6 +54,23 @@ model.summary()
 
 #model.load('./weights/MSDS_noemb_mask_28_0.46876_2021-02-15-20-17-44.tf')
 #model.trainable = False # too fucking important for inferring
+central_storage_strategy = tf.distribute.experimental.CentralStorageStrategy()
+
+with central_storage_strategy.scope():
+    dist_dataset = central_storage_strategy.experimental_distribute_dataset(dataset)
+
+    ds = DataLoader(shuffle=True, data_aug=True)
+    model = MSDS(data_loader = ds, emb = False, mask = True)
+    model.custom_build()
+    model.summary()
+    
+@tf.function
+def distributed_train_step(dist_inputs):
+  per_replica_losses = central_storage_strategy.run(train_step, args=(dist_inputs,))
+  return central_storage_strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,
+                         axis=None)
+
+
 model.fit()
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
