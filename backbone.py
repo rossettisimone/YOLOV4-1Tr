@@ -188,28 +188,28 @@ def load_weights_cspdarknet53(model, weights_file):
         # tf shape (height, width, in_dim, out_dim)
         conv_weights = conv_weights.reshape(conv_shape).transpose([2, 3, 1, 0])
         
-        conv_layer._trainable = False
-        bn_layer._trainable = False
-        
         conv_layer.set_weights([conv_weights])
         bn_layer.set_weights(bn_weights)
 
     # assert len(wf.read()) == 0, 'failed to read all data'
     wf.close()
-
     
-#class CustomResBlock(tf.keras.layers.Layer):
-#    def __init__(self, filters_1, filters_2, activate_type='leaky',name='resblock', **kwargs):
-#        super(CustomResBlock, self).__init__(name=name, **kwargs)
-#
-#        self.conv_1 = CustomConv2D(kernel_size = 1, filters = filters_1, activate_type = activate_type)
-#        self.conv_2 = CustomConv2D(kernel_size = 3, filters = filters_2, activate_type = activate_type)
-#
-#    def call(self, input_layer, training=False):
-#        y = input_layer
-#        x = self.conv_1(input_layer, training)
-#        x = self.conv_2(x, training)
-#        return y + x
+def freeze_weights_cspdarknet53(model, trainable = False):
+    
+    cutoff = 78 # 77 convolutions and batch normalizations
+    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
+    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
+    
+    for i in range(0,cutoff):
+        k = i + conv_0
+        j = i + batch_0
+ 
+        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
+        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
+        conv_layer = model.get_layer(conv_layer_name)
+        bn_layer = model.get_layer(bn_layer_name)
+        conv_layer._trainable = trainable
+        bn_layer._trainable = trainable
 
 class BatchNormalization(tf.keras.layers.BatchNormalization):
     def call(self, x, training=False):
