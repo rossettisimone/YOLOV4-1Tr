@@ -24,13 +24,9 @@ if gpus:
 		print(e)
 else: 
     print('No GPU found')
-    
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+        
 from models import MSDS
 from loader import DataLoader 
-
 ds = DataLoader(shuffle=True, data_aug=True)
 model = MSDS(data_loader = ds, emb = False, mask = True)
 model.custom_build()
@@ -58,6 +54,7 @@ model.summary()
 
 #model.load('./weights/MSDS_noemb_mask_28_0.46876_2021-02-15-20-17-44.tf')
 #model.trainable = False # too fucking important for inferring
+
 model.fit()
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
