@@ -117,27 +117,29 @@ model.fit()
 
 
 #%%
-#from loader import DataLoader
-#from utils import show_infer, show_mAP, draw_bbox, filter_inputs
-#import matplotlib.pyplot as plt
-#
-#ds = DataLoader(shuffle=True, data_aug=False)
-#iterator = ds.train_ds.filter(filter_inputs).repeat().apply(tf.data.experimental.copy_to_device("/gpu:0"))\
-#                .prefetch(tf.data.experimental.AUTOTUNE).batch(1).__iter__()
-#data = iterator.next()
-#image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes = data
-#draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
-#plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
-#plt.show()
-#plt.imshow(tf.reduce_sum(tf.reduce_sum(label_3[0],axis=0),axis=-1))
-#plt.show()
-#plt.imshow(tf.reduce_sum(tf.reduce_sum(label_4[0],axis=0),axis=-1))
-#plt.show()
-#plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
-#plt.show()
-#
-#from utils import decode_labels 
-#p = [label_2,label_3,label_4,label_5]
-#proposals = decode_labels(p)
-#draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mode= 'PIL')
-#from utils import *
+from loader import DataLoader
+from utils import show_infer, show_mAP, draw_bbox, filter_inputs
+import matplotlib.pyplot as plt
+
+ds = DataLoader(shuffle=True, data_aug=True)
+iterator = ds.train_ds.repeat().__iter__()
+data = iterator.next()
+image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes = data
+draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
+plt.show()
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_3[0],axis=0),axis=-1))
+plt.show()
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_4[0],axis=0),axis=-1))
+plt.show()
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
+plt.show()
+
+from utils import decode_labels 
+p = [label_2,label_3,label_4,label_5]
+proposals = decode_labels(p)
+draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mode= 'PIL')
+
+#%%
+import timeit
+print('Time: ', timeit.timeit(lambda: iterator.next(), number = 100))

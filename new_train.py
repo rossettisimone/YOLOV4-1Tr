@@ -52,7 +52,7 @@ GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 
 with strategy.scope():
     
-    dataset = DataLoader(shuffle=True, data_aug=True)
+    dataset = DataLoader(batch_size = GLOBAL_BATCH, shuffle=True, data_aug=True)
     
     train_dataset = dataset.train_ds.repeat().filter(filter_inputs).batch(GLOBAL_BATCH)
     
