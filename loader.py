@@ -152,7 +152,7 @@ class Generator(object):
         except: # image not found or no valid bboxes or not valid masks
             image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
             bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.int32) # bbox + pid
-            masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.float32)
+            masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE), dtype=np.float32)
             
         return image, masks, bboxes
 

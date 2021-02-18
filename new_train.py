@@ -8,32 +8,67 @@ Created on Mon Feb 15 21:08:40 2021
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% BUILD ENV %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import pre_run
     
-#%%%%%%%%%%%%%%%%%%%%%%%%%%% FPS TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import tensorflow as tf
 from loader import DataLoader 
 import tensorflow_addons as tfa
 from datetime import datetime
-from new_utils import distributed_fit, fit
-from new_model import build_model
 import config as cfg
+import os
+from new_model import Model, FreezeBackbone
 
-strategy = tf.distribute.MirroredStrategy()
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 folder = "{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
 
-writer = tf.summary.create_file_writer("./{}/logdir".format(folder))
+logdir = os.path.join(folder, 'logdir')
 
-optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, learning_rate = cfg.LR, momentum = cfg.MOM, nesterov = False)# clipnorm = cfg.GRADIENT_CLIP
+writer = tf.summary.create_file_writer(logdir)
+
+writer.set_as_default()
+        
+optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
+                                learning_rate = cfg.LR, momentum = cfg.MOM, \
+                                nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
+
+callbacks = tf.keras.callbacks.TensorBoard(
+                                log_dir=logdir, histogram_freq=10, write_graph=True,
+                                write_images=True, update_freq='batch', profile_batch=5,
+                                embeddings_freq=0, embeddings_metadata=None)
+
+filepath = os.path.join(folder, 'weights', "cp-{epoch:04d}.ckpt")
+
+# Create a callback that saves the model's weights
+checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath = filepath, \
+                               monitor='val_alb_total_loss', verbose=1, save_best_only=False,
+                               save_weights_only=True, save_freq='epoch')
+
+strategy = tf.distribute.MirroredStrategy()
+
+GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 
 with strategy.scope():
     
     dataset = DataLoader(shuffle=True, data_aug=True)
     
-    model = build_model()
+    train_dataset = dataset.train_ds.repeat().batch(GLOBAL_BATCH)
+    
+    val_dataset = dataset.val_ds.batch(GLOBAL_BATCH)
+    
+    model = Model()
+    
+    model.compile(optimizer)
 
-model.summary()
+freeze = FreezeBackbone(n_epochs = 2, model = model)
 
-distributed_fit(strategy, model, optimizer, dataset, writer, folder, freeze_bkbn_epochs = 2, freeze_bn = False)
+model.fit(train_dataset, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
+          validation_data = val_dataset, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
+          validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
+          callbacks = [callbacks, checkpoint, freeze], use_multiprocessing = True, workers = 24)
+
+model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks])
+
+model.load_weights(filepath.format(epoch = 3))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% FPS TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #import timeit
@@ -44,7 +79,7 @@ distributed_fit(strategy, model, optimizer, dataset, writer, folder, freeze_bkbn
 #trials = 100
 #print("Fps:", trials/timeit.timeit(lambda: infer(model, input_layer), number=trials))
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%% TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #from loader import DataLoader
 #from utils import show_infer, show_mAP, draw_bbox, filter_inputs
 #import matplotlib.pyplot as plt
