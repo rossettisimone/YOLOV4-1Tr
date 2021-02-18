@@ -31,7 +31,15 @@ else:
 from models import MSDS
 from loader import DataLoader 
 
-
+ds = DataLoader(shuffle=True, data_aug=False)
+#with mirrored_strategy.scope():
+model = MSDS(data_loader = ds, emb = False, mask = True)
+model.custom_build()
+#model.plot()
+#model.bkbn.model.summary() 
+#model.neck.summary()
+#model.head.summary()
+model.summary()
 #_________________________________________________________________
 #Layer (type)                 Output Shape              Param #   
 #=================================================================
@@ -54,22 +62,6 @@ from loader import DataLoader
 
 #model.load('./weights/MSDS_noemb_mask_28_0.46876_2021-02-15-20-17-44.tf')
 #model.trainable = False # too fucking important for inferring
-central_storage_strategy = tf.distribute.experimental.CentralStorageStrategy()
-
-with central_storage_strategy.scope():
-    dist_dataset = central_storage_strategy.experimental_distribute_dataset(dataset)
-
-    ds = DataLoader(shuffle=True, data_aug=True)
-    model = MSDS(data_loader = ds, emb = False, mask = True)
-    model.custom_build()
-    model.summary()
-    
-@tf.function
-def distributed_train_step(dist_inputs):
-  per_replica_losses = central_storage_strategy.run(train_step, args=(dist_inputs,))
-  return central_storage_strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,
-                         axis=None)
-
 
 model.fit()
 
@@ -135,7 +127,6 @@ model.fit()
 #ds = DataLoader(shuffle=True, data_aug=False)
 #iterator = ds.train_ds.filter(filter_inputs).repeat().apply(tf.data.experimental.copy_to_device("/gpu:0"))\
 #                .prefetch(tf.data.experimental.AUTOTUNE).batch(1).__iter__()
-#%%
 #data = iterator.next()
 #image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes = data
 #draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')

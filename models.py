@@ -158,8 +158,8 @@ class MSDS(tf.keras.Model): #MSDS, multi subject detection and segmentation
             else:
                 preds, embs = self(image, training=training)
                 alb_total_loss, *loss_list = self.compute_loss_rpn(labels, preds, embs, training)
-            gradients = tape.gradient(alb_total_loss, self.trainable_variables)
-            self.optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, self.trainable_variables) if grad is not None)
+        gradients = tape.gradient(alb_total_loss, self.trainable_variables)
+        self.optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, self.trainable_variables) if grad is not None)
         return [alb_total_loss] + loss_list
     
     def compute_loss(self, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
