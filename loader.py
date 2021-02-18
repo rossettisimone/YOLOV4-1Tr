@@ -165,7 +165,7 @@ class Generator(object):
     def data_labels(self, bboxes, masks):
         labels = []
         for level in range(cfg.LEVELS):
-            label = encode_target(bboxes, masks, self.anchors[level]/self.strides[level], cfg.NUM_ANCHORS, self.num_classes, self.train_output_sizes[level], self.train_output_sizes[level])
+            label = encode_target(bboxes, masks, self.anchors[level]/self.strides[level], cfg.NUM_ANCHORS, cfg.NUM_CLASS, self.train_output_sizes[level], self.train_output_sizes[level])
             labels.append(label)
         return labels
         
@@ -238,8 +238,9 @@ class Generator(object):
         return image, masks, bboxes
     
 class DataLoader(Generator):
-    def __init__(self, shuffle=True, data_aug=True):
+    def __init__(self, batch_size = cfg.BATCH, shuffle=True, data_aug=True):
         print('Dataset loading..')
+        self.batch_size = batch_size
         self.shuffle = shuffle
         self.data_aug = data_aug
         self.json_train_dataset = []
@@ -256,11 +257,9 @@ class DataLoader(Generator):
                 try:
                     if self.json_train_dataset[i]['p_l'][j]['p_id'] > max_id_in_video[self.json_train_dataset[i]['v_id']]:
                         max_id_in_video[self.json_train_dataset[i]['v_id']] = self.json_train_dataset[i]['p_l'][j]['p_id'] 
-                except KeyError as e:
+                except:
                     max_id_in_video[self.json_train_dataset[i]['v_id']] = 0
         self.nID = sum(max_id_in_video.values()) + len(max_id_in_video.values()) # id starts from zero, count them
-        #self.annotation = [(video,frame_id) for video in self.json_train_dataset for frame_id in range(0,61) if not all(p['bb_l'][frame_id]==[0,0,0,0] for p in video['p_l'])] # (video,0),(video,10),..,(video,60) sample each 10 frames
-        #self.train_list, self.val_list = self.split_dataset(len(self.annotation_train))
         self.annotation_train = [(video,frame_id) for video in self.json_train_dataset \
                 for frame_id in range(0,61) if not all(sum(p['bb_l'][frame_id])==0 for p in video['p_l'])]
         self.annotation_val = [(video,frame_id) for video in self.json_val_dataset \
@@ -270,29 +269,23 @@ class DataLoader(Generator):
         if self.shuffle:
             np.random.shuffle(self.train_list)
             np.random.shuffle(self.val_list)
-        self.train_ds = self.initilize_train_ds(self.train_list)
-        self.val_ds = self.initilize_val_ds(self.val_list)
-        self.num_classes = cfg.NUM_CLASS
+        self.train_ds = self.initilize_train_ds()
+        self.val_ds = self.initilize_val_ds()
         self.anchors = np.reshape(np.array(cfg.ANCHORS,dtype=np.int32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
         self.train_input_size = np.array(cfg.TRAIN_SIZE,dtype=np.int32)
         self.strides = np.array(cfg.STRIDES,dtype=np.int32)
         self.train_output_sizes = self.train_input_size // self.strides
-        self.max_bbox_per_scale = cfg.MAX_BBOX_PER_SCALE
         print('Dataset loaded.')
         print('# identities:',self.nID)
             
-    def split_dataset(self, ds_size):
-        total_list = np.arange(ds_size)
-        if self.shuffle:
-            np.random.shuffle(total_list)
-        divider =round(ds_size*cfg.SPLIT_RATIO)
-        return total_list[:divider], total_list[divider:]
-
     @classmethod
     def input_generator(cls, id_list):
         for idx in range(len(id_list)):
             yield id_list[idx]
     
+    def filter_inputs(self, image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes):
+        return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
+
     def read_transform_train(self, idx):
         image, label_2, label_3, label_4, label_5, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
         return image, label_2, label_3, label_4, label_5, masks, bboxes
@@ -301,14 +294,24 @@ class DataLoader(Generator):
         image, label_2, label_3, label_4, label_5, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
         return image, label_2, label_3, label_4, label_5, masks, bboxes
 
-    def initilize_train_ds(self, list_ids):
-        ds = tf.data.Dataset.from_generator(DataLoader.input_generator , args= [list_ids], output_types= (tf.int32))
-        ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+    def generator_train(self, *args):
+        return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.train_list], output_types= (tf.int32))
+    
+    def generator_val(self, *args):
+        return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.val_list], output_types= (tf.int32))
+    
+    def initilize_train_ds(self):
+        ds = tf.data.Dataset.range(2).interleave(self.generator_train, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.filter(self.filter_inputs)
+        ds = ds.batch(self.batch_size, drop_remainder=True)
+        ds = ds.cache().prefetch(tf.data.AUTOTUNE)
         return ds
     
-    def initilize_val_ds(self, list_ids):
-        ds = tf.data.Dataset.from_generator(DataLoader.input_generator , args= [list_ids], output_types= (tf.int32))
-        ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+    def initilize_val_ds(self):
+        ds = tf.data.Dataset.range(2).interleave(self.generator_val, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.filter(self.filter_inputs)
+        ds = ds.batch(self.batch_size, drop_remainder=True)
+        ds = ds.cache().prefetch(tf.data.AUTOTUNE)
         return ds
