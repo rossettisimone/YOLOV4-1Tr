@@ -1,24 +1,7 @@
 
 import os
 import config as cfg
-
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
-
 import tensorflow as tf
-
-gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-	try:
-		# Currently, memory growth needs to be the same across GPUs
-		for gpu in gpus:
-			tf.config.experimental.set_memory_growth(gpu, True)
-		logical_devices = tf.config.experimental.list_logical_devices('GPU')
-		print(len(gpus), "Physical GPUs,", len(logical_devices), "Logical GPUs")
-	except RuntimeError as e:
-		# Memory growth must be set before GPUs have been initialized
-		print(e)
-
 import random
 from PIL import Image
 import numpy as np
@@ -30,36 +13,51 @@ class Generator(object):
     def _single_input_generator_train(self, index):
         [video, frame_id] = self.annotation_train[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
-        if self.data_aug:
-            image, masks, bboxes = self.data_augment(image, masks, bboxes)
-        image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-#        masks, bboxes = self.data_pad(masks, bboxes)
-        label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
-        masks = self.masks_preprocess(masks, bboxes)
-        masks, bboxes = self.data_pad(masks, bboxes)
-        inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
-        try:
-            for input_ in inputs:
-                assert np.isfinite(input_).all(), 'not finite values in inputs'
-        except:
-            for index, input_ in enumerate(inputs):
-                inputs[index] = np.zeros_like(input_)
+        if np.any(bboxes):
+            if self.data_aug:
+                image, masks, bboxes = self.data_augment(image, masks, bboxes)
+            image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
+            label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
+            masks = self.masks_preprocess(masks, bboxes)
+            masks, bboxes = self.data_pad(masks, bboxes)
+            inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
+            try:
+                for input_ in inputs:
+                    assert np.isfinite(input_).all(), 'not finite values in inputs'
+            except:
+                for index, input_ in enumerate(inputs):
+                    inputs[index] = np.zeros_like(input_)
+        else:
+            inputs = [image]
+            for level in range(cfg.LEVELS):
+                label = np.zeros((cfg.NUM_ANCHORS,self.train_output_sizes[level], self.train_output_sizes[level],cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS))
+                inputs.append(label)
+            inputs.append(masks)
+            inputs.append(bboxes)
         return inputs
     
     def _single_input_generator_val(self, index):
         [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
-        image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-        label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
-        masks = self.masks_preprocess(masks, bboxes)
-        masks, bboxes = self.data_pad(masks, bboxes)
-        inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
-        try:
-            for input_ in inputs:
-                assert np.isfinite(input_).all(), 'not finite values in inputs'
-        except:
-            for index, input_ in enumerate(inputs):
-                inputs[index] = np.zeros_like(input_)
+        if np.any(bboxes):
+            image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
+            label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
+            masks = self.masks_preprocess(masks, bboxes)
+            masks, bboxes = self.data_pad(masks, bboxes)
+            inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
+            try:
+                for input_ in inputs:
+                    assert np.isfinite(input_).all(), 'not finite values in inputs'
+            except:
+                for index, input_ in enumerate(inputs):
+                    inputs[index] = np.zeros_like(input_)
+        else:
+            inputs = [image]
+            for level in range(cfg.LEVELS):
+                label = np.zeros((cfg.NUM_ANCHORS,self.train_output_sizes[level], self.train_output_sizes[level],cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS))
+                inputs.append(label)
+            inputs.append(masks)
+            inputs.append(bboxes)
         return inputs
     
     def data_pad(self, masks, bboxes):
@@ -128,18 +126,15 @@ class Generator(object):
         masks = [] 
         try:
             image = np.array(read_image(path))
-            # assert np.isfinite(image).all(), 'nan values in image'
             height, width, _ = image.shape
             for person in video['p_l']:
-                box = person["bb_l"][frame_id]
-                # assert np.isfinite(box).all(), 'nan values in box'
-                if len(box)==8: # Siammask returns 8 scalars (rotated bbox, rectify them)
-                    xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
-                    box=np.array([min(xx),min(yy),max(xx),max(yy)])
+                box = np.array(person["bb_l"][frame_id], dtype=np.float32)
+                if box.shape[0] == 8: # Siammask returns 8 scalars (rotated bbox, rectify them)
+                    xx, yy = box[::2], box[1::2]
+                    box=np.array([np.min(xx),np.min(yy),np.max(xx),np.max(yy)])
                 box=np.clip(box,0,1)
                 p_id = person['p_id']
-                # assert np.isfinite(p_id), 'nan values in p_id'
-                box = np.round(np.r_[box,1]*np.array([width, height, width, height, p_id]))
+                box = np.array(np.r_[box,1]*np.array([width, height, width, height, p_id]), dtype = np.int32)
                 if box[2]>box[0] and box[3]>box[1]:
                     try:
                         path_mask = os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' )
@@ -147,20 +142,16 @@ class Generator(object):
                         m_height, m_width = mask.shape[0], mask.shape[1]
                         assert m_height == height and m_width == width, 'inconsistent dimensions'
                         mask = mask_clamp(mask)
-                        if np.any(mask):
+                        if np.any(mask[box[1]:box[3],box[0]:box[2]]):
                             bboxes.append(box)
                             masks.append(mask)
                     except:
-                        continue
-            if len(bboxes)==0:
-                bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.float32) # bbox + pid
-                masks = np.zeros((cfg.MAX_INSTANCES, image.shape[0], image.shape[1]), dtype=np.float32)
-            else:
-                bboxes = np.stack(bboxes,axis=0)
-                masks = np.stack(masks,axis=0)
-        except:
-            image = np.array(Image.new('RGB', (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), color = (0, 0, 0)))
-            bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.float32) # bbox + pid
+                        pass
+            bboxes = np.stack(bboxes,axis=0) # if bboxes = [] gives an exception --ok 
+            masks = np.stack(masks,axis=0)
+        except: # image not found or no valid bboxes or not valid masks
+            image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
+            bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.int32) # bbox + pid
             masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.float32)
             
         return image, masks, bboxes
@@ -282,9 +273,9 @@ class DataLoader(Generator):
         self.train_ds = self.initilize_train_ds(self.train_list)
         self.val_ds = self.initilize_val_ds(self.val_list)
         self.num_classes = cfg.NUM_CLASS
-        self.anchors = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
-        self.train_input_size = cfg.TRAIN_SIZE
-        self.strides = tf.cast(cfg.STRIDES,tf.float32)
+        self.anchors = np.reshape(np.array(cfg.ANCHORS,dtype=np.int32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
+        self.train_input_size = np.array(cfg.TRAIN_SIZE,dtype=np.int32)
+        self.strides = np.array(cfg.STRIDES,dtype=np.int32)
         self.train_output_sizes = self.train_input_size // self.strides
         self.max_bbox_per_scale = cfg.MAX_BBOX_PER_SCALE
         print('Dataset loaded.')

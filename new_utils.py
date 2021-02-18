@@ -15,7 +15,7 @@ from datetime import datetime
      
 def compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
     # rpn loss 
-    alb_total_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds, embs, training)
+    alb_total_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds, embs)
     # mrcnn loss
     alb_loss, *mrcnn_loss_list = compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks)
     alb_total_loss += alb_loss
@@ -23,7 +23,7 @@ def compute_loss(model, labels, preds, embs, proposals, target_class_ids, target
 
     return [alb_total_loss] + rpn_loss_list + mrcnn_loss_list
 
-def compute_loss_rpn(model, labels, preds, embs, training):
+def compute_loss_rpn(model, labels, preds, embs):
     rpn_box_loss = []
     rpn_class_loss = []
     for label, pred, emb in zip(labels, preds, embs):
@@ -71,7 +71,7 @@ def distributed_train_step(strategy, model, dist_data,  optimizer):
 @tf.function
 def distributed_val_step(strategy, model, dist_data):
     per_replica_losses = strategy.run(val_step, args=(model, dist_data,))
-    return [strategy.reduce(tf.distribute.ReduceOp.SUM, loss, axis=None) for loss in per_replica_losses[0]], per_replica_losses[1]
+    return [strategy.reduce(tf.distribute.ReduceOp.SUM, loss, axis=None) for loss in per_replica_losses]
 
 @tf.function
 def train_step(model, data, optimizer):
@@ -83,9 +83,8 @@ def train_step(model, data, optimizer):
         proposals = proposals[...,:4]
         target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
         alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
-        
-        gradients = tape.gradient(alb_total_loss, model.trainable_variables)
-        optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables) if grad is not None)
+    gradients = tape.gradient(alb_total_loss, model.trainable_variables)
+    optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables) if grad is not None)
     return [alb_total_loss] + loss_list
 
 @tf.function
@@ -93,13 +92,11 @@ def val_step(model, data):
     training = False
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
-    predictions = model(image, training=training)
-    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
+    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = model(image, training=training)
     proposals = proposals[...,:4]
     target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
     alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
-    
-    return [alb_total_loss] + loss_list, predictions
+    return [alb_total_loss] + loss_list
 
 def distributed_fit(strategy, model, optimizer, dataset, writer, folder, epoch = 1, epochs = cfg.EPOCHS, batch_size = cfg.BATCH,\
         steps_train = cfg.STEPS_PER_EPOCH_TRAIN, steps_val = cfg.STEPS_PER_EPOCH_VAL,\
@@ -121,32 +118,28 @@ def distributed_fit(strategy, model, optimizer, dataset, writer, folder, epoch =
             losses = distributed_train_step(strategy, model, data, optimizer)
             loss_summary(writer,  model, optimizer, step_train, losses, training=True)
             print_loss(epoch, step_train, steps_train, losses, training=True)
-            denses_summary(writer, model, step_train, training = True)
             step_train += 1
         freeze_model(model,  trainable = False)
         gc.collect()
         val = dist_dataset_val.__iter__() # use always same batchs
-        mean_AP = []
+        mean_loss = []
         while step_val < epoch * steps_val :
             data = val.next()
-            losses, predictions = distributed_val_step(strategy, model, data) 
-            for pred in predictions:
-                mean_AP.append(show_mAP(data, pred))
+            losses = distributed_val_step(strategy, model, data) 
+            mean_loss.append(losses[0])
             loss_summary(writer, model, optimizer, step_val, losses, training=False)
             print_loss(epoch, step_val, steps_val, losses, training=False)
-            denses_summary(writer, model, step_val, training = False)
-            mAP_summary(writer, step_val, tf.reduce_mean(mean_AP))
             step_val += 1
-        path = "./{}/weights/model_lr{:0.5f}_ep{}_mAP{:0.5f}_date{}.tf".format(folder, optimizer.lr.numpy(), epoch, tf.reduce_mean(mean_AP),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+        path = "./{}/weights/model_lr{:0.5f}_ep{}_mAP{:0.5f}_date{}.tf".format(folder, optimizer.lr.numpy(), epoch, tf.reduce_mean(mean_loss),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
         save(model, path)
         gc.collect()
         epoch += 1
-        
+
 def fit(model,  optimizer, dataset, writer, folder, epoch = 1, epochs = cfg.EPOCHS, batch_size = cfg.BATCH,\
         steps_train = cfg.STEPS_PER_EPOCH_TRAIN, steps_val = cfg.STEPS_PER_EPOCH_VAL,\
         freeze_bkbn_epochs = 2, freeze_bn = False):
-    train_generator = dataset.train_ds.repeat().filter(filter_inputs).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE).__iter__()
-    val_generator = dataset.val_ds.repeat().filter(filter_inputs).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    train_generator = dataset.train_ds.repeat().filter(filter_inputs).batch(batch_size).__iter__()
+    val_generator = dataset.val_ds.repeat().filter(filter_inputs).batch(batch_size)
     step_train = 1
     step_val = 1
     while epoch < epochs:
@@ -164,7 +157,7 @@ def fit(model,  optimizer, dataset, writer, folder, epoch = 1, epochs = cfg.EPOC
             step_train += 1
         freeze_model(model,  trainable = False)
         gc.collect()
-        val = val_generator.__iter__() # use always same batchs
+        val = val_generator.__iter__() # use always same batches
         mean_AP = []
         while step_val < epoch * steps_val :
             data = val.next()
@@ -322,4 +315,3 @@ def save(model, name):
 
 def load(model, name):
     model.load_weights(name)
-    
