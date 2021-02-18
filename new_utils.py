@@ -40,11 +40,10 @@ def compute_loss_rpn_level(label, pred, emb):
     pconf = pred[..., 4:6]
     tbox = label[...,:4]
     tconf = label[...,4]
-    mask = tf.greater(tconf,0.0)
-    if tf.greater(tf.reduce_sum(tf.cast(mask,tf.float32)),0.0):
-        lbox = tf.reduce_mean(smooth_l1_loss(y_true = tf.boolean_mask(tbox,mask),y_pred = tf.boolean_mask(pbox,mask)))
-    else:
-        lbox = tf.constant(0.0)
+    mask = tf.tile(tf.cast(tf.greater(tconf,0.0), tf.float32)[...,tf.newaxis],(1,1,1,1,4))
+    lbox = tf.cond(tf.greater(tf.reduce_sum(mask),0.0), lambda: \
+                   tf.reduce_mean(smooth_l1_loss(y_true = tbox * mask,y_pred = pbox * mask)),\
+                   lambda: tf.constant(0.0))
     non_negative_entry = tf.cast(tf.greater_equal(tconf[...,tf.newaxis],0.0),tf.float32)
     pconf = entry_stop_gradients(pconf, non_negative_entry) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
     tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf),tf.int32)
@@ -56,24 +55,23 @@ def compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_m
     mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
     mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
     mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
-    if tf.greater(tf.reduce_sum(proposals),0.0) :
-        alb_loss = tf.math.exp(-model.s_mc)*mrcnn_class_loss + tf.math.exp(-model.s_mr)*mrcnn_box_loss \
-                + tf.math.exp(-model.s_mm)*mrcnn_mask_loss + (model.s_mr + model.s_mc + model.s_mm) #Automatic Loss Balancing        
-    else:
-        alb_loss = mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss
-    return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss
+    alb_loss = tf.cond(tf.greater(tf.reduce_sum(proposals),0.0), lambda: \
+                tf.math.exp(-model.s_mc)*mrcnn_class_loss + tf.math.exp(-model.s_mr)*mrcnn_box_loss \
+                + tf.math.exp(-model.s_mm)*mrcnn_mask_loss + (model.s_mr + model.s_mc + model.s_mm), \
+                lambda: mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss)
+    return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss  #Automatic Loss Balancing   
 
-@tf.function
+#@tf.funcstion
 def distributed_train_step(strategy, model, dist_data,  optimizer):
     per_replica_losses = strategy.run(train_step, args=(model, dist_data, optimizer,))
     return [strategy.reduce(tf.distribute.ReduceOp.SUM, loss, axis=None) for loss in per_replica_losses]
   
-@tf.function
+#@tf.function
 def distributed_val_step(strategy, model, dist_data):
     per_replica_losses = strategy.run(val_step, args=(model, dist_data,))
     return [strategy.reduce(tf.distribute.ReduceOp.SUM, loss, axis=None) for loss in per_replica_losses]
 
-@tf.function
+#@tf.function
 def train_step(model, data, optimizer):
     training = True
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
@@ -87,7 +85,7 @@ def train_step(model, data, optimizer):
     optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables) if grad is not None)
     return [alb_total_loss] + loss_list
 
-@tf.function
+#@tf.function
 def val_step(model, data):
     training = False
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
@@ -153,7 +151,7 @@ def fit(model,  optimizer, dataset, writer, folder, epoch = 1, epochs = cfg.EPOC
             losses = train_step(model, data,  optimizer)
             loss_summary(writer, model, optimizer, step_train, losses, training=True)
             print_loss(epoch, step_train, steps_train, losses, training=True)
-            denses_summary(writer, model, step_train, training = True)
+#            denses_summary(writer, model, step_train, training = True)
             step_train += 1
         freeze_model(model,  trainable = False)
         gc.collect()
@@ -165,7 +163,7 @@ def fit(model,  optimizer, dataset, writer, folder, epoch = 1, epochs = cfg.EPOC
             mean_AP.append(show_mAP(data, predictions))
             loss_summary(writer, model, optimizer, step_val, losses, training=False)
             print_loss(epoch, step_val, steps_val, losses, training=False)
-            denses_summary(writer, model, step_val, training = False)
+#            denses_summary(writer, model, step_val, training = False)
             mAP_summary(writer, step_val, tf.reduce_mean(mean_AP))
             step_val += 1
         path = "./{}/weights/model_lr{:0.5f}_ep{}_mAP{:0.5f}_date{}.tf".format(folder, optimizer.lr.numpy(), epoch, tf.reduce_mean(mean_AP),datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
@@ -173,7 +171,7 @@ def fit(model,  optimizer, dataset, writer, folder, epoch = 1, epochs = cfg.EPOC
         gc.collect()
         epoch += 1
 
-@tf.function
+#@tf.function
 def infer(model, image):
     preds, embs, proposals, logits, probs, bboxes, masks = model(image, training = False)
     return preds, embs, proposals, logits, probs, bboxes, masks
