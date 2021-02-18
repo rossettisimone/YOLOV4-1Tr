@@ -16,6 +16,7 @@ from datetime import datetime
 import config as cfg
 import os
 from new_model import Model, FreezeBackbone
+from utils import filter_inputs
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -32,9 +33,9 @@ optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
                                 nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
 
 callbacks = tf.keras.callbacks.TensorBoard(
-                                log_dir=logdir, histogram_freq=10, write_graph=True,
-                                write_images=True, update_freq='batch', profile_batch=5,
-                                embeddings_freq=0, embeddings_metadata=None)
+                                log_dir=logdir, histogram_freq=1, write_graph=True,
+                                write_images=True, update_freq='batch', profile_batch=10,
+                                embeddings_freq=1, embeddings_metadata=None)
 
 filepath = os.path.join(folder, 'weights', "cp-{epoch:04d}.ckpt")
 
@@ -43,7 +44,9 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath = filepath, \
                                monitor='val_alb_total_loss', verbose=1, save_best_only=False,
                                save_weights_only=True, save_freq='epoch')
 
-strategy = tf.distribute.MirroredStrategy()
+GPUs = ["GPU:"+i for i in cfg.GPU.split(',')]
+
+strategy = tf.distribute.MirroredStrategy(GPUs)
 
 GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 
@@ -51,9 +54,9 @@ with strategy.scope():
     
     dataset = DataLoader(shuffle=True, data_aug=True)
     
-    train_dataset = dataset.train_ds.repeat().batch(GLOBAL_BATCH)
+    train_dataset = dataset.train_ds.repeat().filter(filter_inputs).batch(GLOBAL_BATCH)
     
-    val_dataset = dataset.val_ds.batch(GLOBAL_BATCH)
+    val_dataset = dataset.val_ds.filter(filter_inputs).batch(GLOBAL_BATCH)
     
     model = Model()
     
