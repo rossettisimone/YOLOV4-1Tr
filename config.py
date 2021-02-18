@@ -1,5 +1,5 @@
-GPU = '0'
-# GPU = '0,1,2,3'
+# GPU = '0'
+GPU = '0,1,2,3'
 
 DATASET_TYPE = 'ava'
 
