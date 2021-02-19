@@ -66,7 +66,16 @@ def img_tranfrom(img, bbox):
 
 def read_image(img_path):
     return Image.open(img_path)
-#
+
+def data_labels(data):
+    bboxes, masks = data
+    ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=np.int32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
+    label_2 = encode_target(bboxes, masks, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0])
+    label_3 = encode_target(bboxes, masks, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1])
+    label_4 = encode_target(bboxes, masks, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2])
+    label_5 = encode_target(bboxes, masks, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3])
+    return label_2, label_3, label_4, label_5
+
 #def scale_coords(img_size, coords, img0_shape):
 #    # Rescale x1, y1, x2, y2 from 416 to image size
 #    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
@@ -313,12 +322,13 @@ def xywh2xyxy(xywh):
 #    gt_box_list = tf.gather(gt_boxes,gt_index)
 #    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
 #
-#    if tf.reduce_sum(tf.cast(fg_index,tf.float32)) > 0:
-#        tid = tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC))
-#        tid = tf.where(tf.equal(tid,0.0),  -1.0, tid)
-#        fg_anchor_list = anchor_mesh[fg_index] 
-#        delta_target = encode_delta(gt_box_list, fg_anchor_list)
-#        tbox = tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4))
+#    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+#    
+#    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
+#    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
+#    fg_anchor_list = anchor_mesh[fg_index] 
+#    delta_target = encode_delta(gt_box_list, fg_anchor_list)
+#    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
 #        
 #    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
 #    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
@@ -356,7 +366,7 @@ def decode_labels(predictions, embeddings = None):
     return proposals
 
 def encode_target(target, masks, anchor_wh, nA, nC, nGh, nGw):
-    
+    masks.set_shape([cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE])
     masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
                             preserve_aspect_ratio=True, antialias=True)[...,0]
 
@@ -403,12 +413,13 @@ def encode_target(target, masks, anchor_wh, nA, nC, nGh, nGw):
     gt_box_list = tf.gather(gt_boxes,gt_index)
     gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
 
-    if tf.reduce_sum(tf.cast(fg_index,tf.float32)) > 0:
-        tid = tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC))
-        tid = tf.where(tf.equal(tid,0.0),  -1.0, tid)
-        fg_anchor_list = anchor_mesh[fg_index] 
-        delta_target = encode_delta(gt_box_list, fg_anchor_list)
-        tbox = tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4))
+    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+    
+    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
+    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
+    fg_anchor_list = anchor_mesh[fg_index] 
+    delta_target = encode_delta(gt_box_list, fg_anchor_list)
+    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
         
     label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
     # need to transpose since for some reason the labels are rotated, maybe scatter_nd?

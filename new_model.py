@@ -4,6 +4,7 @@ from layers import yolov4_plus1_graph, yolov4_plus1_decode_graph, yolov4_plus1_p
      fpn_classifier_graph_AFP, build_fpn_mask_graph_AFP
 import config as cfg
 from new_utils import train_step, val_step, freeze_batch_norm
+from utils import data_labels
 
 class Model(tf.keras.Model):
     def __init__(self):
@@ -15,15 +16,24 @@ class Model(tf.keras.Model):
         self.optimizer = optimizer
         
     def train_step(self, data):
+        image, gt_masks, gt_bboxes = data
+        label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+        data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = train_step(self.model, data, self.optimizer)
         return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
                 "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss}
     
     def test_step(self, data):
+        image, gt_masks, gt_bboxes = data
+        label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+        data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = val_step(self.model, data)
         return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
                 "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss}
-
+        
+    def predict_step(self, image):
+        return self.model(image)
+    
 def model_graph(pretrained_backbone=True): 
      
     input_layer = tf.keras.layers.Input((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))

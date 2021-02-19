@@ -34,7 +34,7 @@ optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
 
 callbacks = tf.keras.callbacks.TensorBoard(
                                 log_dir=logdir, histogram_freq=1, write_graph=True,
-                                write_images=True, update_freq='batch', profile_batch=2,
+                                write_images=True, update_freq='batch', profile_batch='2, 4',
                                 embeddings_freq=1, embeddings_metadata=None)
 
 filepath = os.path.join(folder, 'weights', "cp-{epoch:04d}.ckpt")
@@ -53,6 +53,10 @@ GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 with strategy.scope():
     
     dataset = DataLoader(batch_size = GLOBAL_BATCH, shuffle=True, data_aug=True)
+    
+    train_dataset = dataset.train_ds.repeat()
+    
+    val_dataset = dataset.val_ds
     
     model = Model()
     

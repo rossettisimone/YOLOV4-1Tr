@@ -9,6 +9,11 @@ SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
 TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
 VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
+#VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
+#SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
+#TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
+#VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+
 MIN_BOX_DIM = 0.02
 MIN_BOX_RATIO = 0.2
 SPLIT_RATIO = 0.7

@@ -17,48 +17,18 @@ class Generator(object):
             if self.data_aug:
                 image, masks, bboxes = self.data_augment(image, masks, bboxes)
             image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-            label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
             masks = self.masks_preprocess(masks, bboxes)
             masks, bboxes = self.data_pad(masks, bboxes)
-            inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
-            try:
-                for input_ in inputs:
-                    assert np.isfinite(input_).all(), 'not finite values in inputs'
-            except:
-                for index, input_ in enumerate(inputs):
-                    inputs[index] = np.zeros_like(input_)
-        else:
-            inputs = [image]
-            for level in range(cfg.LEVELS):
-                label = np.zeros((cfg.NUM_ANCHORS,self.train_output_sizes[level], self.train_output_sizes[level],cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS))
-                inputs.append(label)
-            inputs.append(masks)
-            inputs.append(bboxes)
-        return inputs
+        return image, masks, bboxes
     
-    def _single_input_generator_val(self, index):
+    def _single_input_generator_val(self, index):    
         [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
         if np.any(bboxes):
             image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-            label_2, label_3, label_4, label_5 = self.data_labels(bboxes, masks)
             masks = self.masks_preprocess(masks, bboxes)
             masks, bboxes = self.data_pad(masks, bboxes)
-            inputs = [image, label_2, label_3, label_4, label_5, masks, bboxes]
-            try:
-                for input_ in inputs:
-                    assert np.isfinite(input_).all(), 'not finite values in inputs'
-            except:
-                for index, input_ in enumerate(inputs):
-                    inputs[index] = np.zeros_like(input_)
-        else:
-            inputs = [image]
-            for level in range(cfg.LEVELS):
-                label = np.zeros((cfg.NUM_ANCHORS,self.train_output_sizes[level], self.train_output_sizes[level],cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS))
-                inputs.append(label)
-            inputs.append(masks)
-            inputs.append(bboxes)
-        return inputs
+        return image, masks, bboxes
     
     def data_pad(self, masks, bboxes):
         bboxes_padded = np.zeros(( cfg.MAX_INSTANCES,5))
@@ -139,8 +109,6 @@ class Generator(object):
                     try:
                         path_mask = os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' )
                         mask = np.array(read_image(path_mask))
-                        m_height, m_width = mask.shape[0], mask.shape[1]
-                        assert m_height == height and m_width == width, 'inconsistent dimensions'
                         mask = mask_clamp(mask)
                         if np.any(mask[box[1]:box[3],box[0]:box[2]]):
                             bboxes.append(box)
@@ -151,8 +119,8 @@ class Generator(object):
             masks = np.stack(masks,axis=0)
         except: # image not found or no valid bboxes or not valid masks
             image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
-            bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.int32) # bbox + pid
-            masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE), dtype=np.float32)
+            bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.int16) # bbox + pid
+            masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE), dtype=np.float16)
             
         return image, masks, bboxes
 
@@ -161,13 +129,6 @@ class Generator(object):
         image, masks, bboxes = self.random_crop(image, masks, bboxes)
         image, masks, bboxes = self.random_translate(image, masks, bboxes)
         return image, masks, bboxes
-    
-    def data_labels(self, bboxes, masks):
-        labels = []
-        for level in range(cfg.LEVELS):
-            label = encode_target(bboxes, masks, self.anchors[level]/self.strides[level], cfg.NUM_ANCHORS, cfg.NUM_CLASS, self.train_output_sizes[level], self.train_output_sizes[level])
-            labels.append(label)
-        return labels
         
     def random_horizontal_flip(self, image, masks, bboxes):
         if random.random() < 0.5:
@@ -283,16 +244,16 @@ class DataLoader(Generator):
         for idx in range(len(id_list)):
             yield id_list[idx]
     
-    def filter_inputs(self, image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes):
+    def filter_inputs(self, image, gt_masks, gt_bboxes):
         return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
 
     def read_transform_train(self, idx):
-        image, label_2, label_3, label_4, label_5, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
-        return image, label_2, label_3, label_4, label_5, masks, bboxes
+        image, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32])
+        return image, masks, bboxes
 
     def read_transform_val(self, idx):
-        image, label_2, label_3, label_4, label_5, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32])
-        return image, label_2, label_3, label_4, label_5, masks, bboxes
+        image, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32])
+        return image, masks, bboxes
 
     def generator_train(self, *args):
         return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.train_list], output_types= (tf.int32))
