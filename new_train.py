@@ -34,7 +34,7 @@ optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
 
 callbacks = tf.keras.callbacks.TensorBoard(
                                 log_dir=logdir, histogram_freq=1, write_graph=True,
-                                write_images=True, update_freq='batch', profile_batch=10,
+                                write_images=True, update_freq='batch', profile_batch=2,
                                 embeddings_freq=1, embeddings_metadata=None)
 
 filepath = os.path.join(folder, 'weights', "cp-{epoch:04d}.ckpt")
@@ -54,22 +54,18 @@ with strategy.scope():
     
     dataset = DataLoader(batch_size = GLOBAL_BATCH, shuffle=True, data_aug=True)
     
-    train_dataset = dataset.train_ds.repeat().filter(filter_inputs).batch(GLOBAL_BATCH)
-    
-    val_dataset = dataset.val_ds.filter(filter_inputs).batch(GLOBAL_BATCH)
-    
     model = Model()
     
     model.compile(optimizer)
 
 freeze = FreezeBackbone(n_epochs = 2, model = model)
 
-model.fit(train_dataset, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
-          validation_data = val_dataset, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
+model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
+          validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-          callbacks = [callbacks, checkpoint, freeze], use_multiprocessing = True, workers = 24)
+          callbacks = [callbacks, checkpoint, freeze])#use_multiprocessing = True, workers = 24
 
-model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks])
+model.evaluate(dataset.val_ds, batch_size = GLOBAL_BATCH, callbacks = [callbacks])
 
 model.load_weights(filepath.format(epoch = 3))
 

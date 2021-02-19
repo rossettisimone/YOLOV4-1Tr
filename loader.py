@@ -301,17 +301,17 @@ class DataLoader(Generator):
         return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.val_list], output_types= (tf.int32))
     
     def initilize_train_ds(self):
-        ds = tf.data.Dataset.range(2).interleave(self.generator_train, num_parallel_calls=tf.data.AUTOTUNE)
-        ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = tf.data.Dataset.range(2).interleave(self.generator_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.cache().prefetch(tf.data.AUTOTUNE)
+        ds = ds.cache().prefetch(tf.data.experimental.AUTOTUNE).repeat()
         return ds
     
     def initilize_val_ds(self):
-        ds = tf.data.Dataset.range(2).interleave(self.generator_val, num_parallel_calls=tf.data.AUTOTUNE)
-        ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = tf.data.Dataset.range(2).interleave(self.generator_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.cache().prefetch(tf.data.AUTOTUNE)
+        ds = ds.cache().prefetch(tf.data.experimental.AUTOTUNE)
         return ds
