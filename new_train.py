@@ -7,7 +7,7 @@ Created on Mon Feb 15 21:08:40 2021
 """    
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% BUILD ENV %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import pre_run
-    
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import tensorflow as tf
 from loader import DataLoader 
@@ -44,7 +44,9 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath = filepath, \
                                monitor='val_alb_total_loss', verbose=1, save_best_only=False,
                                save_weights_only=True, save_freq='epoch')
 
-strategy = tf.distribute.MirroredStrategy()
+GPUs = ["GPU:"+str(i) for i in range(tf.config.experimental.list_logical_devices('GPU'))]
+
+strategy = tf.distribute.MirroredStrategy(GPUs)
 
 GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 
@@ -71,14 +73,34 @@ model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks])
 
 model.load_weights(filepath.format(epoch = 3))
 
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+model = Model()
+
+model.model.summary()
+
+checkpoint = tf.train.Checkpoint(model.model)
+
+checkpoint.restore('./weights/cp-0005.ckpt')
+
+model.model.trainable = False
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% FPS TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-#import timeit
-#from new_utils import infer
-#input_layer = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
-#infer(model, input_layer); # Warm Up
-#
-#trials = 100
-#print("Fps:", trials/timeit.timeit(lambda: infer(model, input_layer), number=trials))
+
+import timeit
+
+input_layer = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+#model.predict(input_layer); # Warm Up
+
+trials = 100
+
+@tf.function
+def infer(model, input_data):
+    return model(input_data)
+
+infer(model.model, input_layer);
+
+print("Fps:", trials/timeit.timeit(lambda: infer(model.model, input_layer), number=trials))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #from loader import DataLoader
@@ -105,4 +127,30 @@ model.load_weights(filepath.format(epoch = 3))
 #draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mode= 'PIL')
 #from utils import *
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PREDICTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+import matplotlib.pyplot as plt
+from loader import DataLoader 
+import time
+from utils import show_infer, draw_bbox, show_mAP, data_labels
+
+i = 0
+sec = 0
+AP = 0
+ds = DataLoader(shuffle=True, data_aug=False)
+iterator = ds.val_ds.unbatch().batch(1)
+_ = infer(model.model, iterator.__iter__().next()[0])
+for data in iterator.take(10):
+    image, gt_masks, gt_bboxes = data
+    start = time.perf_counter()
+    predictions = infer(model.model, image)
+    end = time.perf_counter()-start
+    i+=1
+    sec += end
+    print(i/sec)
+    label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
+    show_infer(data, predictions)
+    AP += show_mAP(data, predictions)
+    mAP = AP/i    
+    print(mAP)
+#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')

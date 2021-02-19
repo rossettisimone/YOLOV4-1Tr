@@ -286,54 +286,54 @@ def xywh2xyxy(xywh):
     x2y2 = xywh[...,:2] + xywh[...,2:4]*0.5
     return tf.concat([x1y1, x2y2], axis=-1)
 
-#def encode_target(target,masks, anchor_wh, nA, nC, nGh, nGw):
-#    target = tf.cast(target, tf.float32)
-#    bbox = target[:,:4]/cfg.TRAIN_SIZE
-#    ids = target[:,4]
-#    
-#    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
-#    gt_boxes = xyxy2xywh(bbox)
-#    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
-#    anchor_wh = tf.cast(anchor_wh, tf.float32)
-#    tbox = tf.zeros((nA, nGh, nGw, 4))
-#    tconf = tf.zeros(( nA, nGh, nGw))
-#    tid = tf.zeros((nA, nGh, nGw, nC))-1
-#    
-#    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
-#    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
-#    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
-#    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
-#    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-#    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-#    
-#    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
-#    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
-#    
-#    id_index = iou_map > cfg.ID_THRESH
-#    fg_index = iou_map > cfg.FG_THRESH                                                    
-#    bg_index = iou_map < cfg.BG_THRESH 
-#    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
-#                        * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
-#    tconf = tf.where(fg_index, 1.0, tconf)
-#    tconf = tf.where(bg_index, 0.0, tconf)
-#    tconf = tf.where(ign_index, -1.0, tconf)
-#
-#    gt_index = tf.boolean_mask(gt_index_map,fg_index)
-#    gt_box_list = tf.gather(gt_boxes,gt_index)
-#    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
-#
-#    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
-#    
-#    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
-#    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
-#    fg_anchor_list = anchor_mesh[fg_index] 
-#    delta_target = encode_delta(gt_box_list, fg_anchor_list)
-#    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
-#        
-#    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
-#    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
-#    label = tf.transpose(label,(0,2,1,3))
-#    return label
+def encode_target(target,masks, anchor_wh, nA, nC, nGh, nGw):
+    target = tf.cast(target, tf.float32)
+    bbox = target[:,:4]/cfg.TRAIN_SIZE
+    ids = target[:,4]
+    
+    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
+    gt_boxes = xyxy2xywh(bbox)
+    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
+    anchor_wh = tf.cast(anchor_wh, tf.float32)
+    tbox = tf.zeros((nA, nGh, nGw, 4))
+    tconf = tf.zeros(( nA, nGh, nGw))
+    tid = tf.zeros((nA, nGh, nGw, nC))-1
+    
+    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
+    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
+    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
+    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
+    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+    
+    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
+    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
+    
+    id_index = iou_map > cfg.ID_THRESH
+    fg_index = iou_map > cfg.FG_THRESH                                                    
+    bg_index = iou_map < cfg.BG_THRESH 
+    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
+                        * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
+    tconf = tf.where(fg_index, 1.0, tconf)
+    tconf = tf.where(bg_index, 0.0, tconf)
+    tconf = tf.where(ign_index, -1.0, tconf)
+
+    gt_index = tf.boolean_mask(gt_index_map,fg_index)
+    gt_box_list = tf.gather(gt_boxes,gt_index)
+    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
+
+    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+    
+    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
+    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
+    fg_anchor_list = anchor_mesh[fg_index] 
+    delta_target = encode_delta(gt_box_list, fg_anchor_list)
+    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
+        
+    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
+    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
+    label = tf.transpose(label,(0,2,1,3))
+    return label
 
 def decode_label(label, anchors, stride):
     label = tf.transpose(label,(0,1,3,2,4)) # decode_delta_map has some issue
@@ -365,66 +365,66 @@ def decode_labels(predictions, embeddings = None):
     proposals = proposals * tf.tile(proposals[...,4][...,None],(1,1,tf.shape(proposals)[-1]))
     return proposals
 
-def encode_target(target, masks, anchor_wh, nA, nC, nGh, nGw):
-    masks.set_shape([cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE])
-    masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
-                            preserve_aspect_ratio=True, antialias=True)[...,0]
-
-    masks = tf.round(masks)
-    masks = tf.clip_by_value(masks,0,1)
-#    all_non_zero_mask = tf.tile(tf.greater(tf.reduce_sum(masks, axis=[1,2]),0)[...,None,None],(1,nGh,nGw))
-#    masks = tf.where(all_non_zero_mask, masks, tf.ones_like(masks))
-    masks = tf.transpose(masks, (0,2,1))
-    masks = tf.clip_by_value(tf.reduce_sum(masks,axis=0),0,1)
-    masks = tf.tile(tf.cast(masks, tf.bool)[None],(nA,1,1))
-
-    target = tf.cast(target, tf.float32)
-    bbox = target[:,:4]/cfg.TRAIN_SIZE
-    ids = target[:,4]
-    
-    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
-    gt_boxes = xyxy2xywh(bbox)
-    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
-    anchor_wh = tf.cast(anchor_wh, tf.float32)
-    tbox = tf.zeros((nA, nGh, nGw, 4))
-    tconf = tf.zeros(( nA, nGh, nGw))
-    tid = tf.zeros((nA, nGh, nGw, nC))-1
-    
-    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
-    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
-    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
-    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
-    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-    
-    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
-    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
-    
-    id_index = tf.logical_and(iou_map > cfg.ID_THRESH, masks)
-    fg_index = tf.logical_and(iou_map > cfg.FG_THRESH, masks)                                                 
-    bg_index = tf.logical_and(iou_map < cfg.BG_THRESH, tf.logical_not(masks))
-    ign_index = tf.logical_and(tf.logical_and(iou_map < cfg.FG_THRESH, iou_map > cfg.BG_THRESH), tf.logical_not(masks))
-    
-    tconf = tf.where(fg_index, 1.0, tconf)
-    tconf = tf.where(bg_index, 0.0, tconf)
-    tconf = tf.where(ign_index, -1.0, tconf)
-
-    gt_index = tf.boolean_mask(gt_index_map,fg_index)
-    gt_box_list = tf.gather(gt_boxes,gt_index)
-    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
-
-    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
-    
-    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
-    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
-    fg_anchor_list = anchor_mesh[fg_index] 
-    delta_target = encode_delta(gt_box_list, fg_anchor_list)
-    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
-        
-    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
-    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
-    label = tf.transpose(label,(0,2,1,3))
-    return label
+#def encode_target(target, masks, anchor_wh, nA, nC, nGh, nGw):
+#    masks.set_shape([cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE])
+#    masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
+#                            preserve_aspect_ratio=True, antialias=True)[...,0]
+#
+#    masks = tf.round(masks)
+#    masks = tf.clip_by_value(masks,0,1)
+##    all_non_zero_mask = tf.tile(tf.greater(tf.reduce_sum(masks, axis=[1,2]),0)[...,None,None],(1,nGh,nGw))
+##    masks = tf.where(all_non_zero_mask, masks, tf.ones_like(masks))
+#    masks = tf.transpose(masks, (0,2,1))
+#    masks = tf.clip_by_value(tf.reduce_sum(masks,axis=0),0,1)
+#    masks = tf.tile(tf.cast(masks, tf.bool)[None],(nA,1,1))
+#
+#    target = tf.cast(target, tf.float32)
+#    bbox = target[:,:4]/cfg.TRAIN_SIZE
+#    ids = target[:,4]
+#    
+#    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
+#    gt_boxes = xyxy2xywh(bbox)
+#    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
+#    anchor_wh = tf.cast(anchor_wh, tf.float32)
+#    tbox = tf.zeros((nA, nGh, nGw, 4))
+#    tconf = tf.zeros(( nA, nGh, nGw))
+#    tid = tf.zeros((nA, nGh, nGw, nC))-1
+#    
+#    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
+#    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
+#    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
+#    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
+#    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+#    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+#    
+#    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
+#    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
+#    
+#    id_index = tf.logical_and(iou_map > cfg.ID_THRESH, masks)
+#    fg_index = tf.logical_and(iou_map > cfg.FG_THRESH, masks)                                                 
+#    bg_index = tf.logical_and(iou_map < cfg.BG_THRESH, tf.logical_not(masks))
+#    ign_index = tf.logical_and(tf.logical_and(iou_map < cfg.FG_THRESH, iou_map > cfg.BG_THRESH), tf.logical_not(masks))
+#    
+#    tconf = tf.where(fg_index, 1.0, tconf)
+#    tconf = tf.where(bg_index, 0.0, tconf)
+#    tconf = tf.where(ign_index, -1.0, tconf)
+#
+#    gt_index = tf.boolean_mask(gt_index_map,fg_index)
+#    gt_box_list = tf.gather(gt_boxes,gt_index)
+#    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
+#
+#    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+#    
+#    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
+#    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
+#    fg_anchor_list = anchor_mesh[fg_index] 
+#    delta_target = encode_delta(gt_box_list, fg_anchor_list)
+#    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
+#        
+#    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
+#    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
+#    label = tf.transpose(label,(0,2,1,3))
+#    return label
 
 def generate_anchor(nGh, nGw, anchor_wh):
     nA = tf.shape(anchor_wh)[0]
