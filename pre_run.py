@@ -10,6 +10,7 @@ import config as cfg
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]=cfg.GPU
+os.environ["TF_GPU_THREAD_MODE"]="gpu_private"
 
 import gc 
 gc.collect()

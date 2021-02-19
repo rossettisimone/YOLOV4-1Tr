@@ -266,7 +266,7 @@ class DataLoader(Generator):
         ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.cache().prefetch(tf.data.experimental.AUTOTUNE).repeat()
+        ds = ds.repeat().prefetch(tf.data.experimental.AUTOTUNE)
         return ds
     
     def initilize_val_ds(self):
@@ -274,5 +274,5 @@ class DataLoader(Generator):
         ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.cache().prefetch(tf.data.experimental.AUTOTUNE)
+        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
         return ds
