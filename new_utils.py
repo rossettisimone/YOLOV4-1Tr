@@ -233,30 +233,20 @@ def mAP_summary(writer, step, mean_AP):
             with tf.name_scope('mAP_0.5:0.05:0.95'):
                 tf.summary.scalar("mean_AP", tf.squeeze(mean_AP), step=step)
 
-def freeze_model(model,  trainable = True):
-    model.trainable = trainable
-    model.s_c._trainable = trainable
-    model.s_r._trainable = trainable
-    model.s_mc._trainable = trainable
-    model.s_mr._trainable = trainable
-    model.s_mm._trainable = trainable
-
 def freeze_batch_norm(model, trainable = False):  
     for layer in model.layers:
-        try:
-            bn_layer_name = layer.name
-            if bn_layer_name[:10] == 'batch_norm':
-                bn_layer = model.get_layer(bn_layer_name)
-                bn_layer._trainable = trainable
-        except:
-            continue
-        try:
-            bn_layer_name = layer.layer.name # TimeDistributed hides the name
-            if bn_layer_name[:10] == 'batch_norm':
-                bn_layer = model.get_layer(bn_layer_name)
-                bn_layer._trainable = trainable
-        except:
-            continue
+        bn_layer_name = layer.name
+        if bn_layer_name[:10] == 'batch_norm':
+            bn_layer = model.get_layer(bn_layer_name)
+            bn_layer._trainable = trainable
+        else:
+            try:
+                bn_layer_name = layer.layer.name # TimeDistributed hides the name
+                if bn_layer_name[:10] == 'batch_norm':
+                    bn_layer = model.get_layer(bn_layer_name)
+                    bn_layer._trainable = trainable
+            except:
+                continue
 
 def freeze_backbone(model, trainable = False):
     cutoff = 78 # 77 convolutions and batch normalizations
