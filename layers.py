@@ -401,6 +401,10 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
         super(PyramidROIAlign_AFP, self).__init__(**kwargs)
         self.pool_shape = tuple(pool_shape)
 
+    def get_config(self):
+        cfg = super().get_config()
+        return cfg   
+    
     def call(self, inputs):
         # Crop boxes [batch, num_boxes, (y1, x1, y2, x2)] in normalized coords
 #        boxes = inputs[0]

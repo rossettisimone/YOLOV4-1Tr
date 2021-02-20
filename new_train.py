@@ -15,7 +15,7 @@ import tensorflow_addons as tfa
 from datetime import datetime
 import config as cfg
 import os
-from new_model import Model, FreezeBackbone
+from new_model import get_model, FreezeBackbone, EarlyStoppingAtMinLoss
 from utils import filter_inputs
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -58,28 +58,30 @@ with strategy.scope():
     
     val_dataset = dataset.val_ds
     
-    model = Model()
+    model = get_model()
     
     model.compile(optimizer)
 
-freeze = FreezeBackbone(n_epochs = 2, model = model)
+early = EarlyStoppingAtMinLoss(patience = 3)
+
+freeze = FreezeBackbone(n_epochs = 2)
 
 model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
           validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-          callbacks = [callbacks, checkpoint, freeze],use_multiprocessing = True, workers = 24)
+          callbacks = [callbacks, checkpoint, freeze, early], use_multiprocessing = True, workers = 48)
 
-model.evaluate(dataset.val_ds, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = 100)
+model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
 
-model.load_weights(filepath.format(epoch = 3))
+#model.load_weights(filepath.format(epoch = 3))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-model = Model().model
-
-model.summary()
-
-model.load_weights('./weights/cp-0005.ckpt');
+#model = get_model()
+#
+#model.summary()
+#
+#model.load_weights('./weights/cp-0030.ckpt')
 
 model.trainable = False
 
@@ -87,18 +89,14 @@ model.trainable = False
 
 import timeit
 
-input_layer = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+input_data = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
 #model.predict(input_layer); # Warm Up
 
 trials = 100
 
-@tf.function
-def infer(model, input_data):
-    return model(input_data)
+model.infer(input_data);
 
-infer(model, input_layer);
-
-print("Fps:", trials/timeit.timeit(lambda: infer(model, input_layer), number=trials))
+print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trials))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #from loader import DataLoader
@@ -131,28 +129,24 @@ from loader import DataLoader
 import time
 from utils import show_infer, draw_bbox, show_mAP, data_labels
 
-@tf.function
-def infer(model, input_data):
-    return model(input_data)
-
 i = 0
 sec = 0
 AP = 0
 ds = DataLoader(shuffle=True, data_aug=False)
 iterator = ds.val_ds.unbatch().batch(1)
-_ = infer(model, iterator.__iter__().next()[0])
+_ = model.infer(iterator.__iter__().next()[0])
 for data in iterator.take(10):
-    image, gt_masks, gt_bboxes = data
+    image, gt_mask, gt_masks, gt_bboxes = data
     start = time.perf_counter()
-    predictions = infer(model, image)
+    predictions = model.infer(image)
     end = time.perf_counter()-start
     i+=1
     sec += end
     print(i/sec)
-    label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-    show_infer(data, predictions)
+#    show_infer(data, predictions)
     AP += show_mAP(data, predictions)
     mAP = AP/i    
     print(mAP)
-    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
