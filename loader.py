@@ -13,22 +13,26 @@ class Generator(object):
     def _single_input_generator_train(self, index):
         [video, frame_id] = self.annotation_train[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
+        mask = np.zeros((cfg.TRAIN_SIZE,cfg.TRAIN_SIZE))
         if np.any(bboxes):
             if self.data_aug:
                 image, masks, bboxes = self.data_augment(image, masks, bboxes)
             image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
+            mask = np.clip(np.sum(masks,axis=0),0.0,1.0)
             masks = self.masks_preprocess(masks, bboxes)
             masks, bboxes = self.data_pad(masks, bboxes)
-        return image, masks, bboxes
+        return image, mask, masks, bboxes
     
     def _single_input_generator_val(self, index):    
         [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
+        mask = np.zeros((cfg.TRAIN_SIZE,cfg.TRAIN_SIZE))
         if np.any(bboxes):
             image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
+            mask = np.clip(np.sum(masks,axis=0),0.0,1.0)
             masks = self.masks_preprocess(masks, bboxes)
             masks, bboxes = self.data_pad(masks, bboxes)
-        return image, masks, bboxes
+        return image, mask, masks, bboxes
     
     def data_pad(self, masks, bboxes):
         bboxes_padded = np.zeros(( cfg.MAX_INSTANCES,5))
@@ -244,16 +248,16 @@ class DataLoader(Generator):
         for idx in range(len(id_list)):
             yield id_list[idx]
     
-    def filter_inputs(self, image, gt_masks, gt_bboxes):
+    def filter_inputs(self, image, gt_mask, gt_masks, gt_bboxes):
         return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
 
     def read_transform_train(self, idx):
-        image, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32])
-        return image, masks, bboxes
+        image, mask, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32, tf.float32])
+        return image, mask, masks, bboxes
 
     def read_transform_val(self, idx):
-        image, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32])
-        return image, masks, bboxes
+        image, mask, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32, tf.float32])
+        return image, mask, masks, bboxes
 
     def generator_train(self, *args):
         return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.train_list], output_types= (tf.int32))

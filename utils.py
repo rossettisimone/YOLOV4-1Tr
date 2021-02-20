@@ -52,6 +52,7 @@ def mask_clamp(mask):
     if np.any(mask>1): # CDCL RETURN VALUES FROM 0 TO 7 FOR 0 - BACKGROUND, 1 - BOXES, 2 - HEADS, ARMS, LEGS..
         mask[mask==1]=0 # SET BOX LABEL TO 0
     mask = np.clip(mask,0,1)
+    mask = np.round(mask)
     return np.array(mask,dtype=np.float32)
 
 def img_tranfrom(img, bbox):
@@ -68,14 +69,29 @@ def read_image(img_path):
     return Image.open(img_path)
 
 def data_labels(data):
-    bboxes, masks = data
+    bboxes, mask = data
     ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=np.int32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
-    label_2 = encode_target(bboxes, masks, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0])
-    label_3 = encode_target(bboxes, masks, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1])
-    label_4 = encode_target(bboxes, masks, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2])
-    label_5 = encode_target(bboxes, masks, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3])
+    label_2 = encode_target(bboxes, mask, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0])
+    label_3 = encode_target(bboxes, mask, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1])
+    label_4 = encode_target(bboxes, mask, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2])
+    label_5 = encode_target(bboxes, mask, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3])
     return label_2, label_3, label_4, label_5
 
+#def restore(masks, bboxes):
+#    w,h = bboxes[...,2:4]-bboxes[...,:2]
+#    masks = tf.image.resize(masks[...,None], (h,w), method=tf.image.ResizeMethod.BILINEAR, \
+#                            preserve_aspect_ratio=False, antialias=True)[...,0]
+#    padx1,pady1 = tf.cast(bboxes[...,:2], tf.int32)
+#    padx2,pady2 = tf.cast(tf.constant([cfg.TRAIN_SIZE,cfg.TRAIN_SIZE],dtype=tf.float32)-bboxes[...,2:4],tf.int32)
+#    masks = tf.pad(masks,[[pady1,pady2],[padx1,padx2]], mode='CONSTANT', constant_values=0.0)
+#    return masks
+#
+#def restore_mask(data):
+#    bboxes, masks = data
+#    masks.set_shape([cfg.MASK_SIZE, cfg.MASK_SIZE])
+#    masks = tf.cond(tf.greater(tf.reduce_sum(bboxes[...,:4]),0.0), lambda: restore(masks, bboxes), \
+#                    lambda: tf.zeros((cfg.TRAIN_SIZE,cfg.TRAIN_SIZE),dtype=tf.float32))
+#    return masks
 #def scale_coords(img_size, coords, img0_shape):
 #    # Rescale x1, y1, x2, y2 from 416 to image size
 #    gain_w = float(img_size[0]) / img0_shape[1]  # gain  = old / new
@@ -366,16 +382,14 @@ def decode_labels(predictions, embeddings = None):
     return proposals
 
 #def encode_target(target, masks, anchor_wh, nA, nC, nGh, nGw):
-#    masks.set_shape([cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE])
+#        
+#    masks.set_shape([cfg.TRAIN_SIZE, cfg.TRAIN_SIZE])
 #    masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
 #                            preserve_aspect_ratio=True, antialias=True)[...,0]
 #
 #    masks = tf.round(masks)
 #    masks = tf.clip_by_value(masks,0,1)
-##    all_non_zero_mask = tf.tile(tf.greater(tf.reduce_sum(masks, axis=[1,2]),0)[...,None,None],(1,nGh,nGw))
-##    masks = tf.where(all_non_zero_mask, masks, tf.ones_like(masks))
-#    masks = tf.transpose(masks, (0,2,1))
-#    masks = tf.clip_by_value(tf.reduce_sum(masks,axis=0),0,1)
+#    masks = tf.transpose(masks, (1,0))
 #    masks = tf.tile(tf.cast(masks, tf.bool)[None],(nA,1,1))
 #
 #    target = tf.cast(target, tf.float32)
@@ -388,7 +402,7 @@ def decode_labels(predictions, embeddings = None):
 #    anchor_wh = tf.cast(anchor_wh, tf.float32)
 #    tbox = tf.zeros((nA, nGh, nGw, 4))
 #    tconf = tf.zeros(( nA, nGh, nGw))
-#    tid = tf.zeros((nA, nGh, nGw, nC))-1
+#    tid = tf.fill((nA, nGh, nGw, nC),-1.0)
 #    
 #    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
 #    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
@@ -400,10 +414,14 @@ def decode_labels(predictions, embeddings = None):
 #    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
 #    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
 #    
-#    id_index = tf.logical_and(iou_map > cfg.ID_THRESH, masks)
-#    fg_index = tf.logical_and(iou_map > cfg.FG_THRESH, masks)                                                 
-#    bg_index = tf.logical_and(iou_map < cfg.BG_THRESH, tf.logical_not(masks))
-#    ign_index = tf.logical_and(tf.logical_and(iou_map < cfg.FG_THRESH, iou_map > cfg.BG_THRESH), tf.logical_not(masks))
+#    id_index = iou_map > cfg.ID_THRESH
+#    id_index = tf.cond(tf.reduce_any(id_index),lambda: tf.logical_and(masks,id_index), lambda: id_index)
+#    fg_index = iou_map > cfg.FG_THRESH                
+#    fg_index = tf.cond(tf.reduce_any(fg_index),lambda: tf.logical_and(masks,fg_index), lambda: fg_index)                              
+#    bg_index = iou_map < cfg.BG_THRESH
+#    bg_index = tf.cond(tf.reduce_any(bg_index),lambda: tf.logical_and(tf.logical_not(masks),bg_index), lambda: bg_index)
+#    ign_index = tf.logical_or(tf.logical_and(iou_map < cfg.FG_THRESH, iou_map > cfg.BG_THRESH),tf.logical_and(tf.logical_not(masks), tf.logical_not(bg_index)))
+##    ign_index = tf.cond(tf.reduce_any(ign_index),lambda: tf.logical_and(tf.logical_not(masks),ign_index), lambda: ign_index)
 #    
 #    tconf = tf.where(fg_index, 1.0, tconf)
 #    tconf = tf.where(bg_index, 0.0, tconf)
@@ -416,7 +434,7 @@ def decode_labels(predictions, embeddings = None):
 #    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
 #    
 #    tid = tf.cond(cond, lambda: tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), lambda: tid)
-#    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
+##    tid = tf.cond( cond, lambda: tf.where(tf.equal(tid,0.0),  -1.0, tid), lambda: tid)
 #    fg_anchor_list = anchor_mesh[fg_index] 
 #    delta_target = encode_delta(gt_box_list, fg_anchor_list)
 #    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
@@ -546,7 +564,7 @@ def check_proposals_tensor(proposal):
     indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable=True)
 
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
-    k_proposal = tf.range(cfg.MAX_PROP)
+    k_proposal = tf.range(cfg.PRE_NMS_LIMIT)
     k_proposal = tf.stop_gradient(k_proposal)
     proposal = tf.gather(proposal, k_proposal, axis=1) # automatic zero padding
     return proposal

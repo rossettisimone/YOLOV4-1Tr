@@ -121,13 +121,13 @@ from loader import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs
 import matplotlib.pyplot as plt
 from utils import data_labels
-ds = DataLoader(shuffle=True, data_aug=False)
+ds = DataLoader(shuffle=True, data_aug=True)
 iterator = ds.train_ds.repeat().__iter__()
 data = iterator.next()
-image, gt_masks, gt_bboxes = data
+image, gt_mask, gt_masks, gt_bboxes = data
 draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
 
-label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 
 plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
 plt.show()
@@ -143,10 +143,9 @@ p = [label_2,label_3,label_4,label_5]
 proposals = decode_labels(p)
 
 draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE,masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), mode= 'PIL')
-
 #%%
 import timeit
 from loader import DataLoader
 ds = DataLoader(shuffle=True, data_aug=True)
 iterator = ds.train_ds.repeat().__iter__()
-print('Time: ', timeit.timeit(lambda: iterator.next(), number = 100)/100)
+print('Time: ', timeit.timeit(lambda: iterator.next(), number = 50)/50)

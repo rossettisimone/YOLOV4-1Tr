@@ -67,23 +67,21 @@ freeze = FreezeBackbone(n_epochs = 2, model = model)
 model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
           validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-          callbacks = [callbacks, checkpoint, freeze])#use_multiprocessing = True, workers = 24
+          callbacks = [callbacks, checkpoint, freeze],use_multiprocessing = True, workers = 24)
 
-model.evaluate(dataset.val_ds, batch_size = GLOBAL_BATCH, callbacks = [callbacks])
+model.evaluate(dataset.val_ds, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = 100)
 
 model.load_weights(filepath.format(epoch = 3))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-model = Model()
+model = Model().model
 
-model.model.summary()
+model.summary()
 
-checkpoint = tf.train.Checkpoint(model.model)
+model.load_weights('./weights/cp-0005.ckpt');
 
-checkpoint.restore('./weights/cp-0005.ckpt')
-
-model.model.trainable = False
+model.trainable = False
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% FPS TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -98,9 +96,9 @@ trials = 100
 def infer(model, input_data):
     return model(input_data)
 
-infer(model.model, input_layer);
+infer(model, input_layer);
 
-print("Fps:", trials/timeit.timeit(lambda: infer(model.model, input_layer), number=trials))
+print("Fps:", trials/timeit.timeit(lambda: infer(model, input_layer), number=trials))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #from loader import DataLoader
@@ -133,16 +131,20 @@ from loader import DataLoader
 import time
 from utils import show_infer, draw_bbox, show_mAP, data_labels
 
+@tf.function
+def infer(model, input_data):
+    return model(input_data)
+
 i = 0
 sec = 0
 AP = 0
 ds = DataLoader(shuffle=True, data_aug=False)
 iterator = ds.val_ds.unbatch().batch(1)
-_ = infer(model.model, iterator.__iter__().next()[0])
+_ = infer(model, iterator.__iter__().next()[0])
 for data in iterator.take(10):
     image, gt_masks, gt_bboxes = data
     start = time.perf_counter()
-    predictions = infer(model.model, image)
+    predictions = infer(model, image)
     end = time.perf_counter()-start
     i+=1
     sec += end
@@ -153,4 +155,4 @@ for data in iterator.take(10):
     AP += show_mAP(data, predictions)
     mAP = AP/i    
     print(mAP)
-#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
