@@ -22,7 +22,11 @@ from utils import filter_inputs
 
 folder = "{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
 
+os.mkdir(folder)
+
 logdir = os.path.join(folder, 'logdir')
+
+os.mkdir(logdir)
 
 writer = tf.summary.create_file_writer(logdir)
 
@@ -37,12 +41,23 @@ callbacks = tf.keras.callbacks.TensorBoard(
                                 write_images=True, update_freq='batch', profile_batch='2, 4',
                                 embeddings_freq=1, embeddings_metadata=None)
 
-filepath = os.path.join(folder, 'weights', "cp-{epoch:04d}.ckpt")
+filepath = os.path.join(folder, 'weights')
+
+os.mkdir(filepath)
+
+filepath = os.path.join(filepath,'model.{epoch:02d}-{val_alb_total_loss:.3f}.h5')
 
 # Create a callback that saves the model's weights
-checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath = filepath, \
-                               monitor='val_alb_total_loss', verbose=1, save_best_only=False,
-                               save_weights_only=True, save_freq='epoch')
+checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=filepath,
+                                                save_weights_only=True,
+                                                monitor='val_alb_total_loss',
+                                                mode='min',
+                                                save_best_only=True,
+                                                verbose = 1)
+
+early = EarlyStoppingAtMinLoss(patience = 3)
+
+freeze = FreezeBackbone(n_epochs = 2)
 
 GPUs = ["GPU:"+i for i in cfg.GPU.split(',')]
 
@@ -62,10 +77,6 @@ with strategy.scope():
     
     model.compile(optimizer)
 
-early = EarlyStoppingAtMinLoss(patience = 3)
-
-freeze = FreezeBackbone(n_epochs = 2)
-
 model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
           validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
@@ -73,7 +84,7 @@ model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER
 
 model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
 
-#model.load_weights(filepath.format(epoch = 3))
+model.load_weights(filepath)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
