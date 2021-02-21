@@ -530,6 +530,30 @@ def decode_prediction(prediction, anchors, stride):
     proposal = check_proposals_tensor(proposal)
     return proposal
 
+def best_sort_batch(proposal):
+    nB = tf.shape(proposal)[0]
+    _, nP, nC = proposal.shape
+    
+    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING',stable=True)
+    
+    box_indices = tf.range(nB)
+    box_indices = tf.reshape(box_indices, [-1, 1])    
+    box_indices = tf.tile(box_indices, [1, nP])  
+    box_indices = tf.reshape(box_indices, [-1])*nP 
+                
+    flat_indices = tf.reshape(indices,[nB*nP])+box_indices
+    
+    box_indices = tf.stop_gradient(box_indices)
+    flat_indices = tf.stop_gradient(flat_indices)
+    
+    flat_proposal = tf.reshape(proposal,[nB*nP,nC])
+    
+    flat_proposal = tf.gather(flat_proposal,flat_indices)
+    
+    proposal = tf.reshape(flat_proposal,(nB,nP,nC))
+    
+    return proposal
+
 def check_proposals_tensor(proposal):
     """This function remove unconsistent bboxes: x2>x1 and y2>y1 or with bad ratio 
          and sort the proposals by score without iterating over the batch """

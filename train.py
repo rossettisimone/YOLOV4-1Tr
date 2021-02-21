@@ -24,10 +24,7 @@ if gpus:
 		print(e)
 else: 
     print('No GPU found')
-    
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+        
 from models import MSDS
 from loader import DataLoader 
 

@@ -52,7 +52,7 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath = filepath, \
                                monitor='val_alb_total_loss', verbose=1, save_best_only=False,
                                save_weights_only=True, save_freq='epoch')
 
-GPUs = ["GPU:"+str(i) for i in range(len(tf.config.experimental.list_logical_devices('GPU')))]
+GPUs = ["GPU:"+i for i in cfg.GPU.split(',')]
 
 strategy = tf.distribute.MirroredStrategy(GPUs)
 
@@ -74,8 +74,8 @@ early = EarlyStoppingAtMinLoss(patience = 3)
 
 freeze = FreezeBackbone(n_epochs = 2)
 
-model.fit(train_dataset, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
-          validation_data = val_dataset, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
+model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
+          validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
           callbacks = [callbacks, checkpoint, freeze, early], use_multiprocessing = True, workers = 48)
 
