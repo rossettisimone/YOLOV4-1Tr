@@ -46,7 +46,7 @@ filepath = os.path.join(folder, 'weights')
 os.mkdir(filepath)
 
 filepath = os.path.join(filepath,'model.{epoch:02d}-{val_alb_total_loss:.3f}.h5')
-
+             
 # Create a callback that saves the model's weights
 checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=filepath,
                                                 save_weights_only=True,
@@ -84,15 +84,17 @@ model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER
 
 model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
 
-model.load_weights(filepath)
+#model.load_weights('/home/fiorapirri/tracker/2021-02-20-19-31-05/weights/model.02-0.510.h5')
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-#model = get_model()
+# model = get_model()
 #
-#model.summary()
+#model.compile(optimizer)
+
+# model.summary()
 #
-#model.load_weights('./weights/cp-0030.ckpt')
+# model.load_weights('/home/fiorapirri/tracker/weights/model.10--7.542.h5')
 
 model.trainable = False
 
@@ -146,7 +148,7 @@ AP = 0
 ds = DataLoader(shuffle=True, data_aug=False)
 iterator = ds.val_ds.unbatch().batch(1)
 _ = model.infer(iterator.__iter__().next()[0])
-for data in iterator.take(10):
+for data in iterator.take(50):
     image, gt_mask, gt_masks, gt_bboxes = data
     start = time.perf_counter()
     predictions = model.infer(image)
@@ -156,7 +158,7 @@ for data in iterator.take(10):
     print(i/sec)
     label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-#    show_infer(data, predictions)
+    show_infer(data, predictions)
     AP += show_mAP(data, predictions)
     mAP = AP/i    
     print(mAP)

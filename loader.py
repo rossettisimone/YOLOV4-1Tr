@@ -13,31 +13,32 @@ class Generator(object):
     def _single_input_generator_train(self, index):
         [video, frame_id] = self.annotation_train[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
-        mask = np.zeros((cfg.TRAIN_SIZE,cfg.TRAIN_SIZE))
         if np.any(bboxes):
             if self.data_aug:
                 image, masks, bboxes = self.data_augment(image, masks, bboxes)
             image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-            mask = np.clip(np.sum(masks,axis=0),0.0,1.0)
-            masks = self.masks_preprocess(masks, bboxes)
-            masks, bboxes = self.data_pad(masks, bboxes)
-        return image, mask, masks, bboxes
+            mini_masks = self.masks_preprocess(masks, bboxes)
+            masks, mini_masks, bboxes = self.data_pad(masks, mini_masks, bboxes)
+        else:
+            mini_masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE))
+        return image, masks, mini_masks, bboxes
     
     def _single_input_generator_val(self, index):    
         [video, frame_id] = self.annotation_val[index]
         image, masks, bboxes = self.data_generator(video, frame_id)
-        mask = np.zeros((cfg.TRAIN_SIZE,cfg.TRAIN_SIZE))
         if np.any(bboxes):
             image, masks, bboxes = self.data_preprocess(image, bboxes, masks)
-            mask = np.clip(np.sum(masks,axis=0),0.0,1.0)
-            masks = self.masks_preprocess(masks, bboxes)
-            masks, bboxes = self.data_pad(masks, bboxes)
-        return image, mask, masks, bboxes
+            mini_masks = self.masks_preprocess(masks, bboxes)
+            masks, mini_masks, bboxes = self.data_pad(masks, mini_masks, bboxes)
+        else:
+            mini_masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE))
+        return image, masks, mini_masks, bboxes
     
-    def data_pad(self, masks, bboxes):
+    def data_pad(self, masks, mini_masks, bboxes):
         bboxes_padded = np.zeros(( cfg.MAX_INSTANCES,5))
         bboxes_padded[:,4]=-1
         masks_padded = np.zeros(( cfg.MAX_INSTANCES,masks.shape[1],masks.shape[2]))
+        mini_masks_padded = np.zeros(( cfg.MAX_INSTANCES,mini_masks.shape[1],mini_masks.shape[2]))
         #check consistency of bbox after data augmentation: dimension and ratio
         width = bboxes[...,2] - bboxes[...,0]
         height = bboxes[...,3] - bboxes[...,1]
@@ -47,12 +48,13 @@ class Generator(object):
             * ((height/width)>cfg.MIN_BOX_RATIO)
         bboxes = bboxes[mask]
         masks = masks[mask]
+        mini_masks = mini_masks[mask]
         #zero pad
         min_bbox = min(bboxes.shape[0],  cfg.MAX_INSTANCES)
         bboxes_padded[:min_bbox,...]=bboxes[:min_bbox,...]
-        min_mask = min(masks.shape[0],  cfg.MAX_INSTANCES)
-        masks_padded[:min_mask,...]=masks[:min_mask,...]
-        return masks_padded, bboxes_padded
+        masks_padded[:min_bbox,...]=masks[:min_bbox,...]
+        mini_masks_padded[:min_bbox,...]=mini_masks[:min_bbox,...]
+        return masks_padded, mini_masks_padded, bboxes_padded
         
     def masks_preprocess(self, masks, bboxes):
         masks_resized = []
@@ -124,7 +126,7 @@ class Generator(object):
         except: # image not found or no valid bboxes or not valid masks
             image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
             bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.int16) # bbox + pid
-            masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE), dtype=np.float16)
+            masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.float16)
             
         return image, masks, bboxes
 
