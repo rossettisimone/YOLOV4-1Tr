@@ -13,7 +13,7 @@ from backbone import cspdarknet53_graph
 def mish(x):
     return x * tf.math.tanh(tf.math.softplus(x))
 
-def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky'):
+def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky', name=None):
     if downsample:
         x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
         padding = 'valid'
@@ -24,7 +24,7 @@ def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, ac
     x = tf.keras.layers.Conv2D(filters=filters, kernel_size = kernel_size, strides=strides, padding=padding,
                                   use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                  bias_initializer=tf.constant_initializer(0.))(x)
+                                  bias_initializer=tf.constant_initializer(0.),name=name)(x)
     if bn: x = tf.keras.layers.BatchNormalization()(x)
     if activate:
         if activate_type == "leaky":
@@ -479,7 +479,7 @@ class BatchNorm(tf.keras.layers.BatchNormalization):
         """
         return super(self.__class__, self).call(inputs, training=training)
 
-def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=1024):
+def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=cfg.FC_LAYER_SIZE):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
     rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized

@@ -262,6 +262,11 @@ def freeze_backbone(model, trainable = False):
         conv_layer._trainable = trainable
         bn_layer._trainable = trainable
             
+def freeze_rpn(model, trainable = False):
+    cutoff = 561
+    for layer in model.layers[:cutoff]:
+        layer._trainable = trainable
+    
 def variable_summaries(var, step):
     mean = tf.reduce_mean(var)
     tf.summary.scalar('mean', mean, step=step)
