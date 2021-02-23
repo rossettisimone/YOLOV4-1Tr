@@ -15,7 +15,7 @@ import tensorflow_addons as tfa
 from datetime import datetime
 import config as cfg
 import os
-from new_model import get_model, FreezeBackbone, EarlyStoppingAtMinLoss
+from new_model import get_model, FreezeBackbone, EarlyStoppingAtMinLoss, FreezeBatchNorm
 from utils import filter_inputs
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -57,7 +57,9 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=filepath,
 
 early = EarlyStoppingAtMinLoss(patience = 3)
 
-freeze = FreezeBackbone(n_epochs = 2)
+freeze_bkbn = FreezeBackbone(n_epochs = 4)
+
+freeze_bn = FreezeBatchNorm()
 
 GPUs = ["GPU:"+i for i in cfg.GPU.split(',')]
 
@@ -80,7 +82,7 @@ with strategy.scope():
 model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
           validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-          callbacks = [callbacks, checkpoint, freeze, early], use_multiprocessing = True, workers = 48)
+          callbacks = [callbacks, checkpoint, freeze_bkbn], use_multiprocessing = True, workers = 48)
 
 model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
 

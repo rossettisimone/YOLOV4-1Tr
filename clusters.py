@@ -157,13 +157,16 @@ def main():
         ih, iw = (416, 416)
         scale = min(iw/w, ih/h)
         nw, nh  = int(scale * w), int(scale * h)
+        dw, dh = (iw - nw) // 2, (ih-nh) // 2
         for l in line['p_l']:
-            box = l['bb_l'][30]
-            xx, yy = [s for i,s in enumerate(box) if i%2==0 ], [s for i,s in enumerate(box) if not i%2==0]
-            box=np.array([min(xx),min(yy),max(xx),max(yy)])
-            box=np.clip(box,0,1)
-            W,H = (box[2]-box[0])*w/nw, (box[3]-box[1])*h/nh       
-            annotation_dims.append(tuple(map(float,(W,H))))
+            box = np.array(l['bb_l'][30])
+            box = np.clip(box,0,1)
+            xx, yy = box[::2]*w/nw + dw, box[1::2]*h/nh + dh
+            box=np.array([np.min(xx),np.min(yy),np.max(xx),np.max(yy)])
+            box = np.clip(box,0,1)
+            W,H = (box[2]-box[0]), (box[3]-box[1])       
+            if W>1e-3 and H>1e-3 and W/H > 0.2 and H/W > 0.2:
+                annotation_dims.append(tuple(map(float,(W,H))))
     annotation_dims = np.array(annotation_dims)
     print(annotation_dims.shape)
     eps = 0.005
