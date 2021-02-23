@@ -3,7 +3,7 @@ from backbone import cspdarknet53_graph, load_weights_cspdarknet53, freeze_weigh
 from layers import yolov4_plus1_graph, yolov4_plus1_decode_graph, yolov4_plus1_proposal_graph,\
      fpn_classifier_graph_AFP, build_fpn_mask_graph_AFP
 import config as cfg
-from new_utils import train_step, val_step, freeze_batch_norm, freeze_backbone
+from new_utils import train_step, val_step, freeze_batch_norm, freeze_backbone, freeze_rpn
 from utils import data_labels
 import numpy as np
 
@@ -122,3 +122,61 @@ class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
     def on_train_end(self, logs=None):
         if self.stopped_epoch > 0:
             print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
+
+
+class EarlyStoppingRPN(tf.keras.callbacks.Callback):
+    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
+
+  Arguments:
+      patience: Number of epochs to wait after min has been hit. After this
+      number of no improvement, training stops.
+  """
+
+    def __init__(self, patience1=0,patience2=0):
+        super(EarlyStoppingRPN, self).__init__()
+        self.patience1 = patience1
+        self.patience2 = patience2
+        # best_weights to store the weights at which the minimum loss occurs.
+        self.best_weights = None
+
+    def on_train_begin(self, logs=None):
+        # The number of epoch it has waited when loss is no longer minimum.
+        self.wait = 0
+        self.freeze_rpn = False
+        # The epoch the training stops at.
+        self.stopped_epoch = 0
+        # Initialize the best as infinity.
+        self.best = np.Inf
+
+    def on_epoch_end(self, epoch, logs=None):
+        current = logs.get("alb_total_loss")
+        if np.less(current, self.best):
+            self.best = current
+            self.wait = 0
+            # Record the best weights if current results is better (less).
+            self.best_weights = self.model.get_weights()
+        else:
+            self.wait += 1
+            if not self.freeze_rpn:
+                if self.wait >= self.patience1:
+                    self.wait = 0
+                    self.stopped_epoch = epoch
+                    self.freeze_rpn = True
+                    self.model.set_weights(self.best_weights) 
+                    print("Restoring model weights from the end of the best epoch.")
+            else:
+                if self.wait >= self.patience2:
+                    self.stopped_epoch = epoch
+                    self.model.stop_training = True
+                    print("Restoring model weights from the end of the best epoch.")
+                    self.model.set_weights(self.best_weights)
+
+
+    def on_epoch_start(self, epoch, logs=None):
+        if self.freeze_rpn:
+            freeze_rpn(self.model,trainable=False)
+
+    def on_train_end(self, logs=None):
+        if self.stopped_epoch > 0:
+            print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
+
