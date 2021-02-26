@@ -108,7 +108,7 @@ def data_augment( image, masks, bboxes):
     return image, masks, bboxes
     
 def random_horizontal_flip( image, masks, bboxes):
-    if random.random() < 0.5:
+    if np.random.random() < 0.5:
         _, w, _ = image.shape
         image = image[:, ::-1, :]
         masks = masks[:,:,::-1]
@@ -116,7 +116,7 @@ def random_horizontal_flip( image, masks, bboxes):
     return image, masks, bboxes
 
 def random_crop( image, masks, bboxes):
-    if random.random() < 0.5:
+    if np.random.random() < 0.5:
         h, w, _ = image.shape
         max_bbox = np.concatenate(
             [
@@ -130,16 +130,16 @@ def random_crop( image, masks, bboxes):
         max_r_trans = w - max_bbox[2]
         max_d_trans = h - max_bbox[3]
         crop_xmin = max(
-            0, int(max_bbox[0] - random.uniform(0, max_l_trans))
+            0, int(max_bbox[0] - np.random.uniform(0, max_l_trans))
         )
         crop_ymin = max(
-            0, int(max_bbox[1] - random.uniform(0, max_u_trans))
+            0, int(max_bbox[1] - np.random.uniform(0, max_u_trans))
         )
         crop_xmax = max(
-            w, int(max_bbox[2] + random.uniform(0, max_r_trans))
+            w, int(max_bbox[2] + np.random.uniform(0, max_r_trans))
         )
         crop_ymax = max(
-            h, int(max_bbox[3] + random.uniform(0, max_d_trans))
+            h, int(max_bbox[3] + np.random.uniform(0, max_d_trans))
         )
         image = image[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
         masks = masks[:,crop_ymin:crop_ymax, crop_xmin:crop_xmax]
@@ -149,7 +149,7 @@ def random_crop( image, masks, bboxes):
     return image, masks, bboxes
 
 def random_translate( image, masks, bboxes):
-    if random.random() < 0.5:
+    if np.random.random() < 0.5:
         h, w, _ = image.shape
         max_bbox = np.concatenate(
             [
@@ -162,8 +162,8 @@ def random_translate( image, masks, bboxes):
         max_u_trans = max_bbox[1]
         max_r_trans = w - max_bbox[2]
         max_d_trans = h - max_bbox[3]
-        tx = int(random.uniform(-(max_l_trans - 1), (max_r_trans - 1)))
-        ty = int(random.uniform(-(max_u_trans - 1), (max_d_trans - 1)))
+        tx = int(np.random.uniform(-(max_l_trans - 1), (max_r_trans - 1)))
+        ty = int(np.random.uniform(-(max_u_trans - 1), (max_d_trans - 1)))
         old_image = np.copy(image)
         old_masks = np.copy(masks)
         image = np.zeros_like(image)
@@ -263,7 +263,7 @@ def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
     colors = []
     for name, code in ImageColor.colormap.items():
          colors.append(name)
-#    random.shuffle(colors)
+#    np.random.shuffle(colors)
     bboxs = bboxs[...,:4]
     img = Image.fromarray(np.array(image*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   

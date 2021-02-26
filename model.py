@@ -1,6 +1,6 @@
 import config as cfg
 import tensorflow as tf
-from utils import encode_labels, preprocess_mrcnn
+from utils import encode_labels, preprocess_mrcnn, entry_stop_gradients
 from backbone import cspdarknet53_graph, load_weights_cspdarknet53
 from layers import yolov4_plus1_graph, yolov4_plus1_decode_graph, yolov4_plus1_proposal_graph,\
      fpn_classifier_graph_AFP, build_fpn_mask_graph_AFP
