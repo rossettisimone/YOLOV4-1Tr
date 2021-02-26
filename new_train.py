@@ -28,6 +28,10 @@ logdir = os.path.join(folder, 'logdir')
 
 os.mkdir(logdir)
 
+with open('config.py', mode='r') as in_file, open('{}/config.txt'.format(folder), mode='w') as out_file:
+    out_file.write(in_file.read())
+    
+
 writer = tf.summary.create_file_writer(logdir)
 
 writer.set_as_default()
@@ -52,14 +56,8 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=filepath,
                                                 save_weights_only=True,
                                                 monitor='val_alb_total_loss',
                                                 mode='min',
-                                                save_best_only=True,
+                                                save_best_only=False,
                                                 verbose = 1)
-
-early = EarlyStoppingAtMinLoss(patience = 3)
-
-freeze_bkbn = FreezeBackbone(n_epochs = 4)
-
-freeze_bn = FreezeBatchNorm()
 
 GPUs = ["GPU:"+i for i in cfg.GPU.split(',')]
 
@@ -79,14 +77,14 @@ with strategy.scope():
     
     model.compile(optimizer)
 
-early = EarlyStoppingRPN(patience1 = 3, patience2 = 4)
+early = EarlyStoppingRPN(patience1 = 10, patience2 = 10)
 
 freeze = FreezeBackbone(n_epochs = 2)
 
 model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
           validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-          callbacks = [callbacks, checkpoint, freeze_bkbn], use_multiprocessing = True, workers = 48)
+          callbacks = [callbacks, checkpoint, freeze, early], use_multiprocessing = True, workers = 48)
 
 model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
 
@@ -102,20 +100,20 @@ model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], 
 #
 # model.load_weights('/home/fiorapirri/tracker/weights/model.09--10.160.h5')
 
-model.trainable = False
+# model.trainable = False
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% FPS TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-import timeit
+# import timeit
 
-input_data = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
-#model.predict(input_layer); # Warm Up
+# input_data = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+# #model.predict(input_layer); # Warm Up
 
-trials = 100
+# trials = 100
 
-model.infer(input_data);
+# model.infer(input_data);
 
-print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trials))
+# print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trials))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #from loader import DataLoader
@@ -143,35 +141,35 @@ print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trial
 #from utils import *
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PREDICTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-import matplotlib.pyplot as plt
-from loader import DataLoader 
-import time
-from utils import show_infer, draw_bbox, show_mAP, data_labels
+# import matplotlib.pyplot as plt
+# from loader import DataLoader 
+# import time
+# from utils import show_infer, draw_bbox, show_mAP, data_labels
 
-def _round(vec):
-    threshold = 0.3
-    return tf.where(vec>threshold,1,0)
-i = 0
-sec = 0
-AP = 0
-ds = DataLoader(shuffle=True, data_aug=False)
-iterator = ds.train_ds.unbatch().batch(1)
-_ = model.infer(iterator.__iter__().next()[0])
-for data in iterator.take(10):
-    image, gt_mask, gt_masks, gt_bboxes = data
-    start = time.perf_counter()
-    predictions = model.infer(image)
-    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
-    end = time.perf_counter()-start
-    i+=1
-    sec += end
-    print(i/sec)
-    label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
-    data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-    show_infer(data_, predictions)
-    AP += show_mAP(data_, predictions)
-    mAP = AP/i    
-    print(mAP)
-#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
-    plt.imshow(_round(pred_mask[0,0,:,:,1]))
-    plt.show()
+# def _round(vec):
+#     threshold = 0.3
+#     return tf.where(vec>threshold,1,0)
+# i = 0
+# sec = 0
+# AP = 0
+# ds = DataLoader(shuffle=True, data_aug=False)
+# iterator = ds.train_ds.unbatch().batch(1)
+# _ = model.infer(iterator.__iter__().next()[0])
+# for data in iterator.take(10):
+#     image, gt_mask, gt_masks, gt_bboxes = data
+#     start = time.perf_counter()
+#     predictions = model.infer(image)
+#     preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
+#     end = time.perf_counter()-start
+#     i+=1
+#     sec += end
+#     print(i/sec)
+#     label_2, label_3, label_4, label_5 = tf.map_fn(data_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+#     data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
+#     show_infer(data_, predictions)
+#     AP += show_mAP(data_, predictions)
+#     mAP = AP/i    
+#     print(mAP)
+# #    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+#     plt.imshow(_round(pred_mask[0,0,:,:,1]))
+#     plt.show()
