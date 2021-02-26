@@ -16,7 +16,7 @@ import tensorflow_addons as tfa
 from loader import DataLoader 
 from datetime import datetime
 from model import get_model
-from layers import  FreezeBackbone, EarlyStoppingAtMinLoss, EarlyStoppingRPN
+from layers import  FreezeBackbone, EarlyStoppingRPN
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
