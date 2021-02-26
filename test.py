@@ -1,66 +1,102 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Feb 16 19:25:16 2021
+Created on Mon Feb 15 21:08:40 2021
 
-@author: fiorapirri
-"""
+@author: Simone Rossetti
+"""    
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% BUILD ENV %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+import env
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+import os
+import config as cfg
 import tensorflow as tf
-from utils import *
+from loader import DataLoader 
+from model import get_model
 
-def main():
-    test_check_proposals()
-    test_nms_proposals()
-    test_preprocess_mrcnn();
-    test_loss_mrcnn()
-    
-def test_check_proposals(): # on CPU may return error due to tf.gather (which zero pad only on GPU)
-    proposals = tf.random.uniform((20,1000,5))
-    proposals1 = check_proposals_tensor(proposals)
-    proposals2 = tf.map_fn(check_proposals, proposals, fn_output_signature = tf.float32)
-    
-    assert tf.reduce_all(proposals1 == proposals2)
-    
-def test_nms_proposals(): # on CPU may return error due to tf.gather (which zero pad only on GPU)
-    proposals = tf.random.uniform((20,1000,5))
-    proposals1 = nms_proposals_tensor(proposals)
-    proposals2 = tf.map_fn(nms_proposals, proposals, fn_output_signature = tf.float32)
-    
-    assert tf.reduce_all(proposals1 == proposals2)
-    
-    
-def test_preprocess_mrcnn():
-    proposals_1 = tf.random.uniform((2,10,2))*0.5
-    proposals_2 = tf.random.uniform((2,10,2))*0.5 + 0.5
-    proposals = tf.concat([proposals_1, proposals_2], axis=-1)
-    bad_proposals = tf.zeros((2,10,4))
-    proposals = tf.concat([proposals, bad_proposals], axis=1)
-    gt_bboxes_1 = tf.random.uniform((2,5,2))*0.5
-    gt_bboxes_2 = tf.random.uniform((2,5,2))*0.5 + 0.5
-    gt_bboxes = tf.concat([gt_bboxes_1, gt_bboxes_2], axis=-1)* cfg.TRAIN_SIZE
-    gt_masks = tf.round(tf.random.uniform((2,5,28,28)))
-    proposals = tf.zeros((2,20,4))
-    gt_bboxes = tf.zeros((2,10,4))
-    gt_masks = tf.zeros((2,10,28,28))
-    target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks)
-    
-    return target_class_ids, target_bbox, target_masks
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-def test_loss_mrcnn():
-    
-    target_class_ids, target_bbox, target_masks = test_preprocess_mrcnn()
-    pred_class_logits = -tf.stack([tf.concat([-tf.ones((2,10)),-tf.ones((2,10))],axis=-1),\
-                                   tf.concat([tf.ones((2,10)),tf.ones((2,10))],axis=-1)],axis=-1)*10
-    pred_bbox = tf.tile(target_bbox[:,:,None,:],(1,1,2,1))
-    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,2))
-    loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
-    loss += mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
-    loss += mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
-    
-    assert tf.equal(loss, 0)
-    
-if __name__ == '__main__':
-    
-    main()
-    
-    
+model = get_model()
+
+model.summary()
+
+model.load_weights('/home/fiorapirri/tracker/weights/model.09--10.160.h5')
+
+model.trainable = False
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% FPS TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+import timeit
+
+input_data = tf.random.uniform((1, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+#model.predict(input_layer); # Warm Up
+
+trials = 100
+
+model.infer(input_data);
+
+print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trials))
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET ENCODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+from loader import DataLoader
+from utils import show_infer, show_mAP, draw_bbox, filter_inputs
+import matplotlib.pyplot as plt
+
+ds = DataLoader(shuffle=True, augment=False)
+iterator = ds.train_ds.filter(filter_inputs).repeat().batch(1).__iter__()
+data = iterator.next()
+image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes = data
+draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
+plt.show()
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_3[0],axis=0),axis=-1))
+plt.show()
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_4[0],axis=0),axis=-1))
+plt.show()
+plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
+plt.show()
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET DECODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+from utils import decode_labels 
+
+p = [label_2,label_3,label_4,label_5]
+proposals = decode_labels(p)
+draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mode= 'PIL')
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PREDICTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+import matplotlib.pyplot as plt
+from loader import DataLoader 
+import time
+from utils import show_infer, draw_bbox, show_mAP, encode_labels
+
+def _round(vec):
+    threshold = 0.3
+    return tf.where(vec>threshold,1,0)
+i = 0
+sec = 0
+AP = 0
+ds = DataLoader(shuffle=True, augment=False)
+iterator = ds.train_ds.unbatch().batch(1)
+_ = model.infer(iterator.__iter__().next()[0])
+
+for data in iterator.take(10):
+    image, gt_mask, gt_masks, gt_bboxes = data
+    start = time.perf_counter()
+    predictions = model.infer(image)
+    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
+    end = time.perf_counter()-start
+    i+=1
+    sec += end
+    print(i/sec)
+    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
+    show_infer(data_, predictions)
+    AP += show_mAP(data_, predictions)
+    mAP = AP/i    
+    print(mAP)
+   draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+    plt.imshow(_round(pred_mask[0,0,:,:,1]))
+    plt.show()
