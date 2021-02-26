@@ -10,6 +10,27 @@ import tensorflow as tf
 import numpy as np 
 import config as cfg
 
+class cspdarknet53(tf.keras.Model):
+    def __init__(self, pretrained = True, name='cspdarknet53', **kwargs):
+        super(cspdarknet53, self).__init__(name=name, **kwargs)
+        self.model = self.build_graph()
+        if pretrained:
+            load_weights_cspdarknet53(self.model, cfg.CSP_DARKNET53)
+            self.trainable=False
+        
+    def call(self, input_layers, training=False):
+        return self.model(input_layers)
+    
+    def build_graph(self):
+        input_shape = self.get_input_shape()
+        return tf.keras.Model(inputs=input_shape, outputs=cspdarknet53_graph(input_shape))
+    
+    def get_input_shape(self):
+        return tf.keras.layers.Input((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+        
+    def get_output_shape(self):
+        return [out.shape for out in self.call(self.get_input_shape())]
+        
 def cspdarknet53_graph(input_data):
 
     input_data = convolutional(input_data, (3, 3,  3,  32), activate_type="mish")  # 208 x 208 x 32
@@ -78,6 +99,57 @@ def cspdarknet53_graph(input_data):
     input_data = convolutional(input_data, (3, 3, 512, 1024))
     input_data = convolutional(input_data, (1, 1, 1024, 512))
     
+    route_5 = input_data
+    
+    return route_2, route_3, route_4, route_5
+
+def cspdarknet53_tiny(input_data):
+    input_data = convolutional(input_data, (3, 3, 3, 32), downsample=True)
+    input_data = convolutional(input_data, (3, 3, 32, 64), downsample=True)
+    input_data = convolutional(input_data, (3, 3, 64, 64))
+
+    route = input_data
+    input_data = route_group(input_data, 2, 1)
+    input_data = convolutional(input_data, (3, 3, 32, 32))
+    route_1 = input_data
+    input_data = convolutional(input_data, (3, 3, 32, 32))
+    input_data = tf.concat([input_data, route_1], axis=-1)
+    input_data = convolutional(input_data, (1, 1, 32, 64))
+    
+    route_2 = input_data
+
+    input_data = tf.concat([route, input_data], axis=-1)
+    input_data = tf.keras.layers.MaxPool2D(2, 2, 'same')(input_data)
+        
+    input_data = convolutional(input_data, (3, 3, 64, 128))
+    route = input_data
+    input_data = route_group(input_data, 2, 1)
+    input_data = convolutional(input_data, (3, 3, 64, 64))
+    route_1 = input_data
+    input_data = convolutional(input_data, (3, 3, 64, 64))
+    input_data = tf.concat([input_data, route_1], axis=-1)
+    input_data = convolutional(input_data, (1, 1, 64, 128))
+    
+    route_3 = input_data
+    
+    input_data = tf.concat([route, input_data], axis=-1)
+    input_data = tf.keras.layers.MaxPool2D(2, 2, 'same')(input_data)
+
+    input_data = convolutional(input_data, (3, 3, 128, 256))
+    route = input_data
+    input_data = route_group(input_data, 2, 1)
+    input_data = convolutional(input_data, (3, 3, 128, 128))
+    route_1 = input_data
+    input_data = convolutional(input_data, (3, 3, 128, 128))
+    input_data = tf.concat([input_data, route_1], axis=-1)
+    input_data = convolutional(input_data, (1, 1, 128, 256))
+    route_1 = input_data
+    route_4 = input_data
+    input_data = tf.concat([route, input_data], axis=-1)
+    input_data = tf.keras.layers.MaxPool2D(2, 2, 'same')(input_data)
+
+    input_data = convolutional(input_data, (3, 3, 512, 512))
+
     route_5 = input_data
     
     return route_2, route_3, route_4, route_5

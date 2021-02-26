@@ -19,7 +19,8 @@ class Model(tf.keras.Model):
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = train_step(self, data, self.optimizer)
         return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
-                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss}
+                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
+                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mc":self.s_mc, "s_mm":self.s_mm }
     
     def test_step(self, data):
         image, gt_mask, gt_masks, gt_bboxes = data
@@ -27,7 +28,8 @@ class Model(tf.keras.Model):
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = val_step(self, data)
         return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
-                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss}
+                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
+                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mc":self.s_mc, "s_mm":self.s_mm }
     
     @tf.function
     def infer(self, inputs):
