@@ -598,7 +598,7 @@ def check_proposals(proposal):
     indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING')
     proposal = tf.gather(proposal,indices, axis=0)
     
-    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP), axis=0) # automatic zero padding only on GPU
+    proposal = tf.gather(proposal,tf.range(cfg.PRE_NMS_LIMIT), axis=0) # automatic zero padding only on GPU
 
     return proposal
     

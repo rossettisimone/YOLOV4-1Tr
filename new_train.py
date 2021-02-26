@@ -60,9 +60,9 @@ GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 
 with strategy.scope():
     
-    dataset = DataLoader(batch_size = GLOBAL_BATCH, shuffle=True, data_aug=True)
+    dataset = DataLoader(batch_size = GLOBAL_BATCH, shuffle=True, augment=True)
     
-    train_dataset = dataset.train_ds.repeat()
+    train_dataset = dataset.train_ds
     
     val_dataset = dataset.val_ds
     
@@ -74,8 +74,8 @@ early = EarlyStoppingRPN(patience1 = 3, patience2 = 4)
 
 freeze = FreezeBackbone(n_epochs = 2)
 
-model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
-          validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
+model.fit(train_dataset, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
+          validation_data = val_dataset, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
           callbacks = [callbacks, checkpoint, freeze, early], use_multiprocessing = True, workers = 48)
 
@@ -91,7 +91,7 @@ model = get_model()
 
 model.summary()
 #
-model.load_weights('/home/fiorapirri/tracker/weights/model.09--10.160.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.11--9.466.h5')
 
 model.trainable = False
 
@@ -145,7 +145,7 @@ def _round(vec):
 i = 0
 sec = 0
 AP = 0
-ds = DataLoader(shuffle=True, data_aug=False)
+ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1)
 _ = model.infer(iterator.__iter__().next()[0])
 for data in iterator.take(10):
@@ -163,6 +163,4 @@ for data in iterator.take(10):
     AP += show_mAP(data_, predictions)
     mAP = AP/i    
     print(mAP)
-#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
-    plt.imshow(_round(pred_mask[0,0,:,:,1]))
-    plt.show()
+    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')

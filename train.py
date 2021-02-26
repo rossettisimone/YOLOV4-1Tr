@@ -146,6 +146,6 @@ draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE,mas
 #%%
 import timeit
 from loader import DataLoader
-ds = DataLoader(shuffle=True, data_aug=True)
+ds = DataLoader(shuffle=True, augment=True)
 iterator = ds.train_ds.repeat().__iter__()
 print('Time: ', timeit.timeit(lambda: iterator.next(), number = 50)/50)

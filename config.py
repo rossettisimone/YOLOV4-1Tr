@@ -24,7 +24,9 @@ MIN_BOX_RATIO = 0.2
 SPLIT_RATIO = 0.7
 SUMMARY_LOGDIR = './logdir'
 # Input 
-BATCH = 8
+BATCH = 1
+SHUFFLE = True
+DATA_AUGMENT = True
 TRAIN_SIZE = 416
 INPUT_SHAPE= (BATCH, TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
@@ -33,16 +35,21 @@ ID_THRESH = 0.5
 FG_THRESH = 0.5
 BG_THRESH = 0.4
 
-IOU_THRESH = 0.5
+IOU_THRESH = 0.7
 # Network
 DATA_AUGMENTATION = True
 NUM_CLASS = 1
 MAX_BBOX_PER_SCALE = 20
 
-ANCHORS = [ 12,  26,  21,  44,  29,  76,  39, 109,
-           53,  61,  62, 179,  66, 103,  83, 226,
-           111, 187, 136, 298, 138,  99, 167, 193, 
-           239, 376, 322, 414, 349, 256, 424, 423]
+ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
+           27,  82,  57, 165, 102, 209, 181, 235,
+           41, 124,  86, 248, 154, 313, 272, 353,
+           55, 165, 114, 331, 205, 418, 363, 470]
+#
+#[ 12,  26,  21,  44,  29,  76,  39, 109,
+#           53,  61,  62, 179,  66, 103,  83, 226,
+#           111, 187, 136, 298, 138,  99, 167, 193, 
+#           239, 376, 322, 414, 349, 256, 424, 423]
 
 #
 #[  6,  12,  10,  20,  13,  35, 18,  50,  

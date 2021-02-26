@@ -62,7 +62,7 @@ from moviepy.editor import ImageSequenceClip
 import gc
 from PIL import Image
 from utils import data_labels
-ds = DataLoader(shuffle=True, data_aug=False)
+ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).take(10)
 video = []
 for i,data in enumerate(iterator):   
