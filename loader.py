@@ -5,9 +5,10 @@ import numpy as np
 import tensorflow as tf
 from utils import file_reader, mask_clamp, read_image,\
         data_augment, data_preprocess, mini_masks_generator, data_pad, data_check
+np.random.seed(41296)
 
 class Generator(object):
-            
+    
     def _single_input_generator_train(self, index):
         [video, frame_id] = self.annotation_train[index]
         image, masks, mini_masks, bboxes, good_sample = self._data_generator(video, frame_id)

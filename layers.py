@@ -3,13 +3,14 @@
 """
 Created on Mon Dec 21 18:37:18 2020
 
-@author: fiorapirri
+@author: Simone Rossetti
 """
 import tensorflow as tf
 import config as cfg
 from utils import decode_delta_map, xywh2xyxy, nms_proposals,\
     entry_stop_gradients, check_proposals, check_proposals_tensor, nms_proposals_tensor, decode_prediction
 from backbone import cspdarknet53_graph
+import numpy as np
 
 def yolov4_plus1_graph(input_layers):
     

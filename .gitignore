@@ -7,6 +7,7 @@ __pycache__/*
 /logdir
 /__pycache__
 config.py
+weights/*
 /weights*
 /weights_old
 weights_old/
@@ -21,3 +22,7 @@ keyframes/
 /keyframes
 keyframes
 *.json
+.ipynb_checkpoints
+*.ipynb_checkpoints
+.ipynb_checkpoints/*
+images/*

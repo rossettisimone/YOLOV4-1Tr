@@ -97,6 +97,6 @@ for data in iterator.take(10):
     AP += show_mAP(data_, predictions)
     mAP = AP/i    
     print(mAP)
-   draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
     plt.imshow(_round(pred_mask[0,0,:,:,1]))
     plt.show()
