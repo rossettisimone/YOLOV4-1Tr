@@ -6,19 +6,33 @@ Created on Tue Dec 22 18:40:02 2020
 @author: fiorapirri
 """
 
-
+import os
 import json
 import numpy as np
 import config as cfg
 import tensorflow as tf
 from compute_ap import compute_ap_range
 import skimage.transform
+from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
 ###############################################################################################
 ####################################   PREPROCESSING   ########################################
 ###############################################################################################
 
+def folders():
+    folder = "{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+    os.mkdir(folder)
+    logdir = os.path.join(folder, 'logdir')
+    os.mkdir(logdir)
+    # save config file
+    with open('config.py', mode='r') as in_file, open('{}/config.py'.format(folder), mode='w') as out_file:
+        out_file.write(in_file.read())
+    filepath = os.path.join(folder, 'weights')
+    os.mkdir(filepath)
+    filepath = os.path.join(filepath,'model.{epoch:02d}-{val_alb_total_loss:.3f}.h5')
+    return logdir, filepath
+                  
 def filter_inputs(image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes):
     return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
 
