@@ -51,7 +51,7 @@ def get_model(pretrained_backbone=True):
     model.s_mm = tf.Variable(initial_value=0.0, trainable=True)
     if pretrained_backbone:
         load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
-        freeze_backbone(model)
+        # freeze_backbone(model)
     return model
 
 def train_step(model, data, optimizer):
