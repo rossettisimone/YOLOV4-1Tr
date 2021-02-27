@@ -12,6 +12,10 @@ from utils import decode_delta_map, xywh2xyxy, nms_proposals,\
 from backbone import cspdarknet53_graph
 import numpy as np
 
+input_layer = tf.keras.layers.Input((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
+backbone = cspdarknet53_graph(input_layer) # may try a smaller backbone? backbone = cspdarknet53_tiny(input_layer)
+neck = yolov4_plus1_graph(backbone)
+
 def yolov4_plus1_graph(input_layers):
     
     b_2, b_3, b_4, b_5 = input_layers 
@@ -19,9 +23,9 @@ def yolov4_plus1_graph(input_layers):
     # Top - Down FPN
     p_5 = b_5
     x = Conv2D(p_5, kernel_size = 1, filters = 256)
-    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='bilinear')(x)
     y = Conv2D(b_4, kernel_size = 1, filters = 256)
-    x = tf.concat([y,x], axis=-1)
+    x = tf.keras.layers.Add()([y,x])
     
     x = Conv2D(x, kernel_size = 1, filters = 256)
     x = Conv2D(x, kernel_size = 3, filters = 512)
@@ -32,9 +36,9 @@ def yolov4_plus1_graph(input_layers):
     p_4 = x
     
     x = Conv2D(p_4, kernel_size = 1, filters = 128)
-    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='bilinear')(x)
     y = Conv2D(b_3, kernel_size = 1, filters = 128)
-    x = tf.concat([y,x], axis=-1)
+    x = tf.keras.layers.Add()([y,x])
     
     x = Conv2D(x, kernel_size = 1, filters = 128)
     x = Conv2D(x, kernel_size = 3, filters = 256)
@@ -45,9 +49,9 @@ def yolov4_plus1_graph(input_layers):
     p_3 = x
     
     x = Conv2D(p_3, kernel_size = 1, filters = 64)
-    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='bilinear')(x)
     y = Conv2D(b_2, kernel_size = 1, filters = 64)
-    x = tf.concat([y,x], axis=-1)
+    x = tf.keras.layers.Add()([y,x])
     
     x = Conv2D(x, kernel_size = 1, filters = 64)
     x = Conv2D(x, kernel_size = 3, filters = 128)
@@ -61,7 +65,7 @@ def yolov4_plus1_graph(input_layers):
     n_2 = p_2
     
     x = Conv2D(n_2, kernel_size = 3, filters = 128, downsample=True)
-    x = tf.concat([x, p_3], axis=-1)
+    x = tf.keras.layers.Add()([x, p_3])
     x = Conv2D(x, kernel_size = 1, filters = 128)
     x = Conv2D(x, kernel_size = 3, filters = 256)
     x = Conv2D(x, kernel_size = 1, filters = 128)
@@ -71,7 +75,7 @@ def yolov4_plus1_graph(input_layers):
     n_3 = x
     
     x = Conv2D(n_3, kernel_size = 3, filters = 256, downsample=True)
-    x = tf.concat([x, p_4], axis=-1)
+    x = tf.keras.layers.Add()([x, p_4])
     x = Conv2D(x, kernel_size = 1, filters = 256)
     x = Conv2D(x, kernel_size = 3, filters = 512)
     x = Conv2D(x, kernel_size = 1, filters = 256)
@@ -81,7 +85,7 @@ def yolov4_plus1_graph(input_layers):
     n_4 = x
     
     x = Conv2D(n_4, kernel_size = 3, filters = 512, downsample=True)
-    x = tf.concat([x, p_5], axis=-1)
+    x = tf.keras.layers.Add()([x, p_5])
     x = Conv2D(x, kernel_size = 1, filters = 512)
     x = Conv2D(x, kernel_size = 3, filters = 1024)
     x = Conv2D(x, kernel_size = 1, filters = 512)
