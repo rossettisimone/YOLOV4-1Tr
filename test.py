@@ -21,7 +21,7 @@ model = get_model()
 
 model.summary()
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.09--10.160.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.11--9.466.h5')
 
 model.trainable = False
 
@@ -40,13 +40,15 @@ print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trial
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET ENCODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 from loader import DataLoader
-from utils import show_infer, show_mAP, draw_bbox, filter_inputs
+from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels
 import matplotlib.pyplot as plt
 
 ds = DataLoader(shuffle=True, augment=False)
-iterator = ds.train_ds.filter(filter_inputs).repeat().batch(1).__iter__()
+iterator = ds.train_ds.unbatch().batch(1).__iter__()
 data = iterator.next()
-image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes = data
+image, gt_mask, gt_masks, gt_bboxes = data
+label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
 draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
 plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
 plt.show()
@@ -56,6 +58,38 @@ plt.imshow(tf.reduce_sum(tf.reduce_sum(label_4[0],axis=0),axis=-1))
 plt.show()
 plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
 plt.show()
+
+#%%
+from backbone import cspdarknet53_graph, load_weights_cspdarknet53
+
+model = get_model()
+
+model.summary()
+
+model.load_weights('/home/fiorapirri/tracker/weights/model.11--9.466.h5')
+
+model.trainable = False
+
+#%%
+
+from loader import DataLoader
+from utils import draw_bbox, encode_labels
+import matplotlib.pyplot as plt
+
+ds = DataLoader(shuffle=True, augment=False)
+iterator = ds.train_ds.unbatch().batch(1).__iter__()
+data = iterator.next()
+image, gt_mask, gt_masks, gt_bboxes = data
+
+draw_bbox(image = image[0].numpy(), mode= 'PIL')
+
+output = model(image)
+
+for o in output[1]:
+    o=o[0]
+    for i in range(o.shape[-1]):
+        plt.imshow(o[:,:,i])
+        plt.show()
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET DECODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

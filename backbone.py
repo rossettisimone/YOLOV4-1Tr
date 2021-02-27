@@ -34,8 +34,8 @@ def cspdarknet53_graph(input_data):
     input_data = convolutional(input_data, (1, 1, 64, 64), activate_type="mish")
     input_data = tf.concat([input_data, route], axis=-1)
 
-    input_data = convolutional(input_data, (1, 1, 128, 128), activate_type="mish") # 52 x 52 x 128
-    route_2 = input_data
+    input_data = convolutional(input_data, (1, 1, 128, 128), activate_type="mish",name='backbone_2') # 52 x 52 x 128
+    r_2 = input_data
     input_data = convolutional(input_data, (3, 3, 128, 256), downsample=True, activate_type="mish")
     route = input_data
     route = convolutional(route, (1, 1, 256, 128), activate_type="mish")
@@ -45,8 +45,8 @@ def cspdarknet53_graph(input_data):
     input_data = convolutional(input_data, (1, 1, 128, 128), activate_type="mish")
     input_data = tf.concat([input_data, route], axis=-1)
 
-    input_data = convolutional(input_data, (1, 1, 256, 256), activate_type="mish") #  26 x 26 x 256
-    route_3 = input_data
+    input_data = convolutional(input_data, (1, 1, 256, 256), activate_type="mish",name='backbone_3') #  26 x 26 x 256
+    r_3 = input_data
     input_data = convolutional(input_data, (3, 3, 256, 512), downsample=True, activate_type="mish")
     route = input_data
     route = convolutional(route, (1, 1, 512, 256), activate_type="mish")
@@ -56,8 +56,8 @@ def cspdarknet53_graph(input_data):
     input_data = convolutional(input_data, (1, 1, 256, 256), activate_type="mish")
     input_data = tf.concat([input_data, route], axis=-1)
 
-    input_data = convolutional(input_data, (1, 1, 512, 512), activate_type="mish") # 13 x 13 x 512
-    route_4 = input_data
+    input_data = convolutional(input_data, (1, 1, 512, 512), activate_type="mish",name='backbone_4') # 13 x 13 x 512
+    r_4 = input_data
     input_data = convolutional(input_data, (3, 3, 512, 1024), downsample=True, activate_type="mish")
     route = input_data
     route = convolutional(route, (1, 1, 1024, 512), activate_type="mish")
@@ -76,11 +76,11 @@ def cspdarknet53_graph(input_data):
                             , tf.nn.max_pool(input_data, ksize=5, padding='SAME', strides=1), input_data], axis=-1)
     input_data = convolutional(input_data, (1, 1, 2048, 512))
     input_data = convolutional(input_data, (3, 3, 512, 1024))
-    input_data = convolutional(input_data, (1, 1, 1024, 512))
+    input_data = convolutional(input_data, (1, 1, 1024, 512),name='backbone_5')
     
-    route_5 = input_data
+    r_5 = input_data
     
-    return route_2, route_3, route_4, route_5
+    return r_2, r_3, r_4, r_5
 
 def load_weights_cspdarknet53(model, weights_file):
   
@@ -146,7 +146,7 @@ class BatchNormalization(tf.keras.layers.BatchNormalization):
         training = tf.logical_and(training, self.trainable)
         return super().call(x, training)
 
-def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky'):
+def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky', name=None):
     if downsample:
         input_layer = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(input_layer)
         padding = 'valid'
@@ -163,7 +163,7 @@ def convolutional(input_layer, filters_shape, downsample=False, activate=True, b
     if bn: conv = BatchNormalization()(conv)
     if activate == True:
         if activate_type == "leaky":
-            conv = tf.nn.leaky_relu(conv, alpha=0.1)
+            conv = tf.keras.layers.LeakyReLU(alpha=0.1, name=name)(conv)
         elif activate_type == "mish":
             conv = mish(conv)
     return conv

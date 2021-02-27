@@ -41,7 +41,7 @@ def get_model(pretrained_backbone=True):
     rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions)
     mrcnn_class_logits, mrcnn_class, mrcnn_bbox = fpn_classifier_graph_AFP([rpn_proposals[...,:4],rpn_embeddings])
     mrcnn_mask = build_fpn_mask_graph_AFP([rpn_proposals[...,:4],rpn_embeddings])
-    model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_embeddings, \
+    model = Model(inputs=input_layer, outputs=[backbone, neck, rpn_predictions, rpn_embeddings, \
                                                 rpn_proposals, mrcnn_class_logits, \
                                                 mrcnn_class, mrcnn_bbox, mrcnn_mask])
     model.s_c = tf.Variable(initial_value=0.0, trainable=True)

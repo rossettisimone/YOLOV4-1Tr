@@ -264,10 +264,11 @@ def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
     for name, code in ImageColor.colormap.items():
          colors.append(name)
 #    np.random.shuffle(colors)
-    bboxs = bboxs[...,:4]
+    if np.any(bboxs is not None):
+        bboxs = bboxs[...,:4]
     img = Image.fromarray(np.array(image*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   
-    if np.any(conf_id is None):
+    if np.any(conf_id is not None):
         conf_id = tf.zeros_like(bboxs)[...,0]
     if np.any(bboxs is not None):
         for i,(bbox,conf) in enumerate(zip(bboxs, conf_id)):
