@@ -12,10 +12,6 @@ from utils import decode_delta_map, xywh2xyxy, nms_proposals,\
 from backbone import cspdarknet53_graph
 import numpy as np
 
-input_layer = tf.keras.layers.Input((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3))
-backbone = cspdarknet53_graph(input_layer) # may try a smaller backbone? backbone = cspdarknet53_tiny(input_layer)
-neck = yolov4_plus1_graph(backbone)
-
 def yolov4_plus1_graph(input_layers):
     
     b_2, b_3, b_4, b_5 = input_layers 

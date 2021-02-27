@@ -49,12 +49,12 @@ with strategy.scope():
     dataset = DataLoader(batch_size = GLOBAL_BATCH, shuffle=True, augment=True)
     train_dataset = dataset.train_ds
     val_dataset = dataset.val_ds
-    model = get_model(pretrained_backbone = True)
+    model = get_model(pretrained_backbone = False)
     model.compile(optimizer)
 
 model.fit(dataset.train_ds, epochs = cfg.EPOCHS, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
           validation_data = dataset.val_ds, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
           validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-          callbacks = [callbacks, checkpoint, early, freeze], use_multiprocessing = True, workers = 48)
+          callbacks = [callbacks, checkpoint, early], use_multiprocessing = True, workers = 48)
 
 model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
