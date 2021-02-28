@@ -32,9 +32,6 @@ class DataLoader(object):
         annotation_val = self.parse_frames(json_val_dataset)
         train_list = np.arange(len(annotation_train))
         val_list = np.arange(len(annotation_val))
-        if self.shuffle:
-            np.random.shuffle(train_list)
-            np.random.shuffle(val_list)
         return annotation_train, annotation_val, train_list, val_list, nIDs
         
     def read_json_list(self, json_list):
@@ -69,15 +66,11 @@ class DataLoader(object):
     def read_transform_val(self, idx):
         image, mask, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32, tf.float32])
         return image, mask, masks, bboxes
-
-    def generator_train(self, *args):
-        return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.train_list], output_types= (tf.int32))
-    
-    def generator_val(self, *args):
-        return tf.data.Dataset.from_generator(DataLoader.input_generator, args= [self.val_list], output_types= (tf.int32))
     
     def initilize_train_ds(self):
-        ds = tf.data.Dataset.range(1).interleave(self.generator_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        if self.shuffle:
+            np.random.shuffle(self.train_list)
+        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.train_list], output_types=(tf.int32))
         ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs)
         ds = ds.batch(self.batch_size, drop_remainder=True)
@@ -85,7 +78,9 @@ class DataLoader(object):
         return ds
     
     def initilize_val_ds(self):
-        ds = tf.data.Dataset.range(1).interleave(self.generator_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        if self.shuffle:
+            np.random.shuffle(self.val_list)
+        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.val_list], output_types=(tf.int32))
         ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs)
         ds = ds.batch(self.batch_size, drop_remainder=True)
@@ -102,6 +97,7 @@ class DataLoader(object):
             mini_masks = mini_masks_generator(masks, bboxes)
             masks, mini_masks, bboxes = data_check(masks, mini_masks, bboxes)
             masks, mini_masks, bboxes = data_pad(masks, mini_masks, bboxes)
+            masks = 1.
         return image, masks, mini_masks, bboxes
     
     def _single_input_generator_val(self, index):    
@@ -112,6 +108,7 @@ class DataLoader(object):
             mini_masks = mini_masks_generator(masks, bboxes)
             masks, mini_masks, bboxes = data_check(masks, mini_masks, bboxes)
             masks, mini_masks, bboxes = data_pad(masks, mini_masks, bboxes)
+            masks = 1.
         return image, masks, mini_masks, bboxes
     
     def _data_generator(self, video, frame_id):

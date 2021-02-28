@@ -38,6 +38,20 @@ model.infer(input_data);
 
 print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trials))
 
+#%%
+
+import timeit
+
+from loader import DataLoader 
+
+ds = DataLoader(shuffle=True, augment=True)
+
+iterator = ds.train_ds.__iter__()
+
+trials = 100
+
+print("Time:", timeit.timeit(lambda: iterator.next(), number=trials)/trials)
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET ENCODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 from loader import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels
@@ -60,9 +74,11 @@ plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
 plt.show()
 
 #%%
-from backbone import cspdarknet53_graph, load_weights_cspdarknet53
+from layers import fine_tuning
 
 model = get_model()
+
+fine_tuning(model)
 
 model.summary()
 
@@ -85,7 +101,7 @@ draw_bbox(image = image[0].numpy(), mode= 'PIL')
 
 output = model(image)
 
-for o in output[1]:
+for o in output[0]:
     o=o[0]
     for i in range(o.shape[-1]):
         plt.imshow(o[:,:,i])
@@ -132,5 +148,3 @@ for data in iterator.take(10):
     mAP = AP/i    
     print(mAP)
     draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
-    plt.imshow(_round(pred_mask[0,0,:,:,1]))
-    plt.show()

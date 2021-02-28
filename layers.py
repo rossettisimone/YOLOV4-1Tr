@@ -19,9 +19,9 @@ def yolov4_plus1_graph(input_layers):
     # Top - Down FPN
     p_5 = b_5
     x = Conv2D(p_5, kernel_size = 1, filters = 256)
-    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='bilinear')(x)
     y = Conv2D(b_4, kernel_size = 1, filters = 256)
-    x = tf.concat([y,x], axis=-1)
+    x = tf.concat([y,x],axis=-1)
     
     x = Conv2D(x, kernel_size = 1, filters = 256)
     x = Conv2D(x, kernel_size = 3, filters = 512)
@@ -32,9 +32,9 @@ def yolov4_plus1_graph(input_layers):
     p_4 = x
     
     x = Conv2D(p_4, kernel_size = 1, filters = 128)
-    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='bilinear')(x)
     y = Conv2D(b_3, kernel_size = 1, filters = 128)
-    x = tf.concat([y,x], axis=-1)
+    x = tf.concat([y,x],axis=-1)
     
     x = Conv2D(x, kernel_size = 1, filters = 128)
     x = Conv2D(x, kernel_size = 3, filters = 256)
@@ -45,9 +45,9 @@ def yolov4_plus1_graph(input_layers):
     p_3 = x
     
     x = Conv2D(p_3, kernel_size = 1, filters = 64)
-    x = tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
+    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='bilinear')(x)
     y = Conv2D(b_2, kernel_size = 1, filters = 64)
-    x = tf.concat([y,x], axis=-1)
+    x = tf.concat([y,x],axis=-1)
     
     x = Conv2D(x, kernel_size = 1, filters = 64)
     x = Conv2D(x, kernel_size = 3, filters = 128)
@@ -71,7 +71,7 @@ def yolov4_plus1_graph(input_layers):
     n_3 = x
     
     x = Conv2D(n_3, kernel_size = 3, filters = 256, downsample=True)
-    x = tf.concat([x, p_4], axis=-1)
+    x = tf.concat([x, p_4],axis=-1)
     x = Conv2D(x, kernel_size = 1, filters = 256)
     x = Conv2D(x, kernel_size = 3, filters = 512)
     x = Conv2D(x, kernel_size = 1, filters = 256)
@@ -81,7 +81,7 @@ def yolov4_plus1_graph(input_layers):
     n_4 = x
     
     x = Conv2D(n_4, kernel_size = 3, filters = 512, downsample=True)
-    x = tf.concat([x, p_5], axis=-1)
+    x = tf.concat([x, p_5],axis=-1)
     x = Conv2D(x, kernel_size = 1, filters = 512)
     x = Conv2D(x, kernel_size = 3, filters = 1024)
     x = Conv2D(x, kernel_size = 1, filters = 512)
@@ -99,28 +99,28 @@ def yolov4_plus1_decode_graph(input_layer):
     prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
-    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, activate_type = "relu", bn=True)
+    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_2, kernel_size = 3, filters = 64)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, activate_type = "relu", bn=True)
+    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_3, kernel_size = 3, filters = 128)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, activate_type = "relu", bn=True)
+    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_4, kernel_size = 3, filters = 256)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, activate_type = "relu", bn=True)
+    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_5, kernel_size = 3, filters = 512)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
@@ -334,6 +334,55 @@ class FreezeBatchNorm(tf.keras.callbacks.Callback):
     def on_epoch_start(self, epoch, logs=None):
         freeze_batch_norm(self.model)
 
+
+def freeze_batch_norm(model, trainable = False):  
+    for layer in model.layers:
+        bn_layer_name = layer.name
+        if bn_layer_name[:10] == 'batch_norm':
+            bn_layer = model.get_layer(bn_layer_name)
+            bn_layer._trainable = trainable
+        else:
+            try:
+                bn_layer_name = layer.layer.name # TimeDistributed hides the name
+                if bn_layer_name[:10] == 'batch_norm':
+                    bn_layer = model.get_layer(bn_layer_name)
+                    bn_layer._trainable = trainable
+            except:
+                continue
+
+def freeze_backbone(model, trainable = False):
+    cutoff = 78 # 77 convolutions and batch normalizations
+    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
+    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
+    for i in range(0,cutoff):
+        k = i + conv_0
+        j = i + batch_0
+        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
+        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
+        conv_layer = model.get_layer(conv_layer_name)
+        bn_layer = model.get_layer(bn_layer_name)
+        conv_layer._trainable = trainable
+        bn_layer._trainable = trainable
+            
+def freeze_rpn(model, trainable = False):
+    cutoff = 561
+    for layer in model.layers[:cutoff]:
+        layer._trainable = trainable
+
+def fine_tuning(model):
+    out_layers = [16, 37, 58, 77]
+    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
+    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
+    for i in out_layers:
+        k = i + conv_0
+        j = i + batch_0
+        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
+        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
+        conv_layer = model.get_layer(conv_layer_name)       
+        bn_layer = model.get_layer(bn_layer_name)
+        conv_layer.trainable = True
+        bn_layer.trainable = True
+
 class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
     """Stop training when the loss is at its min, i.e. the loss stops decreasing.
 
@@ -427,6 +476,7 @@ class EarlyStoppingRPN(tf.keras.callbacks.Callback):
     def on_epoch_start(self, epoch, logs=None):
         if self.freeze_rpn:
             freeze_rpn(self.model,trainable=False)
+            print('Freezed RPN')
 
     def on_train_end(self, logs=None):
         if self.stopped_epoch > 0:
