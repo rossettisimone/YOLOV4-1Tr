@@ -35,7 +35,7 @@ def cspdarknet53_graph(input_data):
     input_data = tf.concat([input_data, route], axis=-1)
 
     input_data = convolutional(input_data, (1, 1, 128, 128), activate_type="mish") # 52 x 52 x 128
-    route_2 = input_data
+    b_2 = input_data
     input_data = convolutional(input_data, (3, 3, 128, 256), downsample=True, activate_type="mish")
     route = input_data
     route = convolutional(route, (1, 1, 256, 128), activate_type="mish")
@@ -46,7 +46,7 @@ def cspdarknet53_graph(input_data):
     input_data = tf.concat([input_data, route], axis=-1)
 
     input_data = convolutional(input_data, (1, 1, 256, 256), activate_type="mish") #  26 x 26 x 256
-    route_3 = input_data
+    b_3 = input_data
     input_data = convolutional(input_data, (3, 3, 256, 512), downsample=True, activate_type="mish")
     route = input_data
     route = convolutional(route, (1, 1, 512, 256), activate_type="mish")
@@ -57,7 +57,7 @@ def cspdarknet53_graph(input_data):
     input_data = tf.concat([input_data, route], axis=-1)
 
     input_data = convolutional(input_data, (1, 1, 512, 512), activate_type="mish") # 13 x 13 x 512
-    route_4 = input_data
+    b_4 = input_data
     input_data = convolutional(input_data, (3, 3, 512, 1024), downsample=True, activate_type="mish")
     route = input_data
     route = convolutional(route, (1, 1, 1024, 512), activate_type="mish")
@@ -72,15 +72,17 @@ def cspdarknet53_graph(input_data):
     input_data = convolutional(input_data, (3, 3, 512, 1024))
     input_data = convolutional(input_data, (1, 1, 1024, 512))
 
-    input_data = tf.concat([tf.nn.max_pool(input_data, ksize=13, padding='SAME', strides=1), tf.nn.max_pool(input_data, ksize=9, padding='SAME', strides=1)
-                            , tf.nn.max_pool(input_data, ksize=5, padding='SAME', strides=1), input_data], axis=-1)
+    input_data = tf.concat([tf.nn.max_pool(input_data, ksize=13, padding='SAME', strides=1),\
+                            tf.nn.max_pool(input_data, ksize=9, padding='SAME', strides=1), \
+                            tf.nn.max_pool(input_data, ksize=5, padding='SAME', strides=1), input_data], axis=-1)
+    
     input_data = convolutional(input_data, (1, 1, 2048, 512))
     input_data = convolutional(input_data, (3, 3, 512, 1024))
     input_data = convolutional(input_data, (1, 1, 1024, 512))
     
-    route_5 = input_data
+    b_5 = input_data
     
-    return route_2, route_3, route_4, route_5
+    return b_2, b_3, b_4, b_5
 
 def load_weights_cspdarknet53(model, weights_file):
   
@@ -146,7 +148,7 @@ class BatchNormalization(tf.keras.layers.BatchNormalization):
         training = tf.logical_and(training, self.trainable)
         return super().call(x, training)
 
-def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky'):
+def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky', name=None):
     if downsample:
         input_layer = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(input_layer)
         padding = 'valid'
@@ -158,7 +160,7 @@ def convolutional(input_layer, filters_shape, downsample=False, activate=True, b
     conv = tf.keras.layers.Conv2D(filters=filters_shape[-1], kernel_size = filters_shape[0], strides=strides, padding=padding,
                                   use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                  bias_initializer=tf.constant_initializer(0.))(input_layer)
+                                  bias_initializer=tf.constant_initializer(0.), name=name)(input_layer)
 
     if bn: conv = BatchNormalization()(conv)
     if activate == True:
