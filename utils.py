@@ -239,7 +239,7 @@ def show_infer(data, prediction):
     if len(prediction)>3:
         preds, embs, proposals, logits, probs, bboxes, masks = prediction
         for i in range(nB):
-            bbox_mrcnn, id_mrcnn, conf_mrcnn, mask_mrcnn = decode_mask(proposals[i], probs[i], bboxes[i], masks[i], 'keep')
+            bbox_mrcnn, id_mrcnn, conf_mrcnn, mask_mrcnn = decode_mask(proposals[i], probs[i], bboxes[i], masks[i], 'cut')
             if len(bbox_mrcnn)>0:
                 draw_bbox(image[i], bboxs = bbox_mrcnn, masks = mask_mrcnn, conf_id = conf_mrcnn, mode= 'PIL')
             else:

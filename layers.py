@@ -11,6 +11,7 @@ from utils import decode_delta_map, xywh2xyxy, nms_proposals,\
     entry_stop_gradients, check_proposals, check_proposals_tensor, nms_proposals_tensor, decode_prediction
 from backbone import cspdarknet53_graph
 import numpy as np
+from group_norm import GroupNormalization as GroupNorm
 
 def yolov4_plus1_graph(input_layers):
     
@@ -167,28 +168,28 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
     # ROI Pooling
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
     x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_classifier")(inputs)
-    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp2')(x2)
-    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp2_gn')(x2)
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp2_gn')(x2)
     x2 = tf.keras.layers.Activation('relu', name='roi_class_afp2_gn_relu')(x2)
-    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp3')(x3)
-    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp3_gn')(x3)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp3_gn')(x3)
     x3 = tf.keras.layers.Activation('relu', name='roi_class_afp3_gn_relu')(x3)
-    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp4')(x4)
-    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp4_gn')(x4)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp4_gn')(x4)
     x4 = tf.keras.layers.Activation('relu', name='roi_class_afp4_gn_relu')(x4)
-    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_class_afp5')(x5)
-    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_class_afp5_gn')(x5)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp5_gn')(x5)
     x5 = tf.keras.layers.Activation('relu', name='roi_class_afp5_gn_relu')(x5)
 
     x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv1")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv1_gn')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"), name="mrcnn_class_conv1")(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_class_conv1_gn')(x)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv1_gn_relu')(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv2")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv2_gn')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"), name="mrcnn_class_conv2")(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_class_conv2_gn')(x)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv2_gn_relu')(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"), name="mrcnn_class_conv3")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_class_conv3_gn')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"), name="mrcnn_class_conv3")(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_class_conv3_gn')(x)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv3_gn_relu')(x)
 
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
@@ -227,43 +228,43 @@ def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes
     # ROI Pooling
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
     x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_mask")(inputs)
-    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp2')(x2)
-    x2 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp2_gn')(x2)
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_mask_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_mask_afp2_gn')(x2)
     x2 = tf.keras.layers.Activation('relu', name='roi_mask_afp2_gn_relu')(x2)
-    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp3')(x3)
-    x3 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp3_gn')(x3)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_mask_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_mask_afp3_gn')(x3)
     x3 = tf.keras.layers.Activation('relu', name='roi_mask_afp3_gn_relu')(x3)
-    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp4')(x4)
-    x4 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp4_gn')(x4)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_mask_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_mask_afp4_gn')(x4)
     x4 = tf.keras.layers.Activation('relu', name='roi_mask_afp4_gn_relu')(x4)
-    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding='same'), name='roi_mask_afp5')(x5)
-    x5 = tf.keras.layers.TimeDistributed(BatchNorm(), name='roi_mask_afp5_gn')(x5)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_mask_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_mask_afp5_gn')(x5)
     x5 = tf.keras.layers.Activation('relu', name='roi_mask_afp5_gn_relu')(x5)
 
     x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"),
                            name="mrcnn_mask_conv1")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn1')(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_mask_gn1')(x)
     x = tf.keras.layers.Activation('relu')(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"),
                            name="mrcnn_mask_conv2")(x)
-    x = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn2')(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_mask_gn2')(x)
     shared = tf.keras.layers.Activation('relu')(x)
 
-    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"),
                            name="mrcnn_mask_conv3")(shared)
-    x_fcn = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn3')(x_fcn)
+    x_fcn = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_mask_gn3')(x_fcn)
     x_fcn = tf.keras.layers.Activation('relu')(x_fcn)
-    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2DTranspose(cfg.EMB_DIM, (2, 2), strides=(2, 2), activation="relu"),
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2DTranspose(cfg.MASK_LAYERS_SIZE, (2, 2), strides=(2, 2), activation="relu"),
                            name="mrcnn_mask_deconv")(x_fcn)
 
-    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM, (3, 3), padding="same"),
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"),
                            name="mrcnn_mask_conv4")(shared)
-    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn4')(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_mask_gn4')(x_ff)
     x_ff = tf.keras.layers.Activation('relu')(x_ff)
-    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.EMB_DIM//2, (3, 3), padding="same"),
+    x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE//2, (3, 3), padding="same"),
                               name="mrcnn_mask_conv5")(x_ff)
-    x_ff = tf.keras.layers.TimeDistributed(BatchNorm(), name='mrcnn_mask_gn5')(x_ff)
+    x_ff = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_mask_gn5')(x_ff)
     x_ff = tf.keras.layers.Activation('relu')(x_ff)
     x_ff_shape = x_ff.shape.as_list()
     x_ff = tf.keras.layers.Reshape((x_ff_shape[1], x_ff_shape[2]*x_ff_shape[3]*x_ff_shape[4]))(x_ff)
