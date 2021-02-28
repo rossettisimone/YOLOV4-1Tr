@@ -21,7 +21,7 @@ model = get_model()
 
 model.summary()
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.11--9.466.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.07--10.531.h5')
 
 model.trainable = False
 
@@ -91,7 +91,8 @@ model.trainable = False
 from loader import DataLoader
 from utils import draw_bbox, encode_labels
 import matplotlib.pyplot as plt
-
+from PIL import Image
+import numpy as np
 ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 data = iterator.next()
@@ -101,11 +102,72 @@ draw_bbox(image = image[0].numpy(), mode= 'PIL')
 
 output = model(image)
 
-for o in output[0]:
-    o=o[0]
-    for i in range(o.shape[-1]):
-        plt.imshow(o[:,:,i])
-        plt.show()
+path = os.path.join('experiments')
+os.makedirs(path,exist_ok=True)
+path = os.path.join(path,'normal_labelling')
+Image.fromarray(np.array(image[0].numpy()*255,np.uint8)).save(os.path.join(path,'image.png'))
+os.makedirs(path,exist_ok=True)
+for i in range(0,4):
+    if i==0:
+        subpath = os.path.join(path,'backbone')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            subsubpath = os.path.join(subpath,'b_{}'.format(str(j+2)))
+            os.makedirs(subsubpath,exist_ok=True)
+            o=o[0]
+            for c in range(o.shape[-1]):
+                img = o[:,:,c].numpy()*255
+                name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                img = Image.fromarray(img)
+                w,h = img.size
+                img.resize((w*5,h*5)).convert("L").save(name)
+            print(os.path.join(subpath,'b_{}'.format(str(j+2))))
+    elif i==1:
+        subpath = os.path.join(path,'neck')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            subsubpath = os.path.join(subpath,'n_{}'.format(str(j+2)))
+            os.makedirs(subsubpath,exist_ok=True)
+            o=o[0]
+            for c in range(o.shape[-1]):
+                img = o[:,:,c].numpy()*255
+                name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                img = Image.fromarray(img)
+                w,h = img.size
+                img.resize((w*5,h*5)).convert("L").save(name)
+            print(os.path.join(subpath,'n_{}'.format(str(j+2))))
+    elif i==2:
+        subpath = os.path.join(path,'head_predictions')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            subsubpath = os.path.join(subpath,'p_{}'.format(str(j+2)))
+            os.makedirs(subsubpath,exist_ok=True)
+            o=o[0]
+            for a in range(o.shape[0]):
+                subsubsubpath = os.path.join(subsubpath,'a_{}'.format(str(a+1)))
+                os.makedirs(subsubsubpath,exist_ok=True)
+                for c in range(o.shape[-1]):
+                    img = o[a,:,:,c].numpy()*255
+                    name = os.path.join(subsubsubpath,'channel_{}.png'.format(str(c)))
+                    img = Image.fromarray(img)
+                    w,h = img.size
+                    img.resize((w*5,h*5)).convert("L").save(name)
+            print(os.path.join(subpath,'p_{}'.format(str(j+2))))
+    elif i==3:
+        subpath = os.path.join(path,'head_embeddings')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            subsubpath = os.path.join(subpath,'e_{}'.format(str(j+2)))
+            os.makedirs(subsubpath,exist_ok=True)
+            o=o[0]
+            for c in range(o.shape[-1]):
+                img = o[:,:,c].numpy()*255
+                name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                img = Image.fromarray(img)
+                w,h = img.size
+                img.resize((w*5,h*5)).convert("L").save(name)
+            print(os.path.join(subpath,'e_{}'.format(str(j+2))))
+        
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET DECODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -122,9 +184,6 @@ from loader import DataLoader
 import time
 from utils import show_infer, draw_bbox, show_mAP, encode_labels
 
-def _round(vec):
-    threshold = 0.3
-    return tf.where(vec>threshold,1,0)
 i = 0
 sec = 0
 AP = 0
