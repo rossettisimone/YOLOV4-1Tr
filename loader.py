@@ -97,7 +97,6 @@ class DataLoader(object):
             mini_masks = mini_masks_generator(masks, bboxes)
             masks, mini_masks, bboxes = data_check(masks, mini_masks, bboxes)
             masks, mini_masks, bboxes = data_pad(masks, mini_masks, bboxes)
-            masks = 1.
         return image, masks, mini_masks, bboxes
     
     def _single_input_generator_val(self, index):    
@@ -108,7 +107,6 @@ class DataLoader(object):
             mini_masks = mini_masks_generator(masks, bboxes)
             masks, mini_masks, bboxes = data_check(masks, mini_masks, bboxes)
             masks, mini_masks, bboxes = data_pad(masks, mini_masks, bboxes)
-            masks = 1.
         return image, masks, mini_masks, bboxes
     
     def _data_generator(self, video, frame_id):

@@ -99,28 +99,28 @@ def yolov4_plus1_decode_graph(input_layer):
     prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
-    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, bn=True, activate_type = 'relu')
     x = Conv2D(n_2, kernel_size = 3, filters = 64)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, bn=True, activate_type = 'relu')
     x = Conv2D(n_3, kernel_size = 3, filters = 128)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, bn=True, activate_type = 'relu')
     x = Conv2D(n_4, kernel_size = 3, filters = 256)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, bn=True, activate_type = 'relu')
     x = Conv2D(n_5, kernel_size = 3, filters = 512)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
