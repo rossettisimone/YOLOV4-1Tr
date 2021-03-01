@@ -80,7 +80,7 @@ def yolov4_plus1_panet_fpn_decode_graph(input_layer):
                                       cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    return [p_2,p_3,p_4,p_5], n_2, n_3, n_4, n_5
+    return [p_2,p_3,p_4,p_5], [n_2, n_3, n_4, n_5]
 
 def yolov4_plus1_graph(input_layers):
     
