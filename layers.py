@@ -13,6 +13,75 @@ from backbone import cspdarknet53_graph
 import numpy as np
 from group_norm import GroupNormalization as GroupNorm
 
+def panet_fpn_graph(input_layers):
+        
+    b_2, b_3, b_4, b_5 = input_layers 
+    
+    # Top - Down FPN
+    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_5))
+    p_4 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_5),\
+                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_4))])
+    p_3 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_4),\
+                        GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_3))])
+    p_2 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_3),\
+                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_2))])
+    
+    p_2 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_2))
+    p_3 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_3))
+    p_4 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_4))
+    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_5))
+
+    # Bottom-up path augmentation
+    n_2 = p_2
+    
+    n_3 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+            tf.keras.layers.Add()([p_3, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_2)))]))))
+    n_4 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+        tf.keras.layers.Add()([p_4, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_3)))]))))
+    n_5 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+        tf.keras.layers.Add()([p_5, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_4)))]))))
+    
+    return n_2, n_3, n_4, n_5
+
+def yolov4_plus1_panet_fpn_decode_graph(input_layer):
+    
+    n_2, n_3, n_4, n_5 = input_layer
+    
+    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
+    prediction_filters = cfg.NUM_ANCHORS * prediction_channels
+    
+    x = Conv2D(n_2, kernel_size = 3, filters = 64)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    x = Conv2D(n_3, kernel_size = 3, filters = 128)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    x = Conv2D(n_4, kernel_size = 3, filters = 256)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    x = Conv2D(n_5, kernel_size = 3, filters = 512)
+    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+    p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
+                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+    
+    return [p_2,p_3,p_4,p_5], [n_2, n_3, n_4, n_5]
+
 def yolov4_plus1_graph(input_layers):
     
     b_2, b_3, b_4, b_5 = input_layers 
@@ -167,7 +236,7 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
     # rois, feature_maps = inputs[0], inputs[1]
     # ROI Pooling
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
-    x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_classifier")(inputs)
+    x2, x3, x4, x5 = inputs
     x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp2')(x2)
     x2 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp2_gn')(x2)
     x2 = tf.keras.layers.Activation('relu', name='roi_class_afp2_gn_relu')(x2)
@@ -227,7 +296,7 @@ def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes
     # rois, feature_maps = inputs[0], inputs[1]
     # ROI Pooling
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
-    x2, x3, x4, x5 = PyramidROIAlign_AFP((pool_size, pool_size),name="roi_align_mask")(inputs)
+    x2, x3, x4, x5 = inputs
     x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_mask_afp2')(x2)
     x2 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_mask_afp2_gn')(x2)
     x2 = tf.keras.layers.Activation('relu', name='roi_mask_afp2_gn_relu')(x2)

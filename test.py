@@ -82,7 +82,7 @@ fine_tuning(model)
 
 model.summary()
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.11--9.466.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.18--7.873.h5')
 
 model.trainable = False
 
@@ -104,9 +104,9 @@ output = model(image)
 
 path = os.path.join('experiments')
 os.makedirs(path,exist_ok=True)
-path = os.path.join(path,'normal_labelling')
-Image.fromarray(np.array(image[0].numpy()*255,np.uint8)).save(os.path.join(path,'image.png'))
+path = os.path.join(path,'new_labelling')
 os.makedirs(path,exist_ok=True)
+Image.fromarray(np.array(image[0].numpy()*255,np.uint8)).save(os.path.join(path,'image.png'))
 for i in range(0,4):
     if i==0:
         subpath = os.path.join(path,'backbone')
