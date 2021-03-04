@@ -771,7 +771,7 @@ def preprocess_target_indices(proposal_gt_mask):
     gt_intersect = bbox_iou(proposal,gt_bbox)
     target_indices = tf.math.argmax(gt_intersect,axis=-1)
     # Determine positive and negative ROIs
-    valid_indices = tf.reduce_max(gt_intersect, axis=1)
+    valid_indices = tf.reduce_max(gt_intersect, axis=-1)
     target_class_ids = tf.cast(valid_indices >= cfg.IOU_THRESH, tf.int64) # in this dataset if there is bbox, it's human, 1 class
     return target_indices, target_class_ids 
 
@@ -783,11 +783,11 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
         A float32 tensor of values 0 or 1. """
     gt_bboxes = gt_bboxes[...,:4]
     gt_bboxes /= cfg.TRAIN_SIZE
-    gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
+    # gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
     gt_bboxes = xyxy2xywh(gt_bboxes)
     proposals = tf.stop_gradient(proposals)
     proposals = proposals[...,:4]
-    proposals = tf.clip_by_value(proposals, 0.0, 1.0) # redundant
+    # proposals = tf.clip_by_value(proposals, 0.0, 1.0) # redundant
     proposals = xyxy2xywh(proposals)  
     target_indices, target_class_ids = tf.map_fn(preprocess_target_indices, (proposals, gt_bboxes), fn_output_signature=(tf.int64,tf.int64))
     target_bbox = tf.map_fn(preprocess_target_bbox, (proposals, gt_bboxes, target_indices), fn_output_signature=tf.float32)
