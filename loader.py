@@ -3,7 +3,7 @@ import config as cfg
 import numpy as np
 import tensorflow as tf
 from utils import file_reader, mask_clamp, read_image,\
-        data_augment, data_preprocess, mini_masks_generator, data_pad, data_check
+        data_augment, data_preprocess, data_pad, data_check
 np.random.seed(41296)
     
 class DataLoader(object):
@@ -56,16 +56,16 @@ class DataLoader(object):
         return [(video,frame_id) for video in json_dataset \
                 for frame_id in range(0,61) if not all(sum(p['bb_l'][frame_id])==0 for p in video['p_l'])]
         
-    def filter_inputs(self, image, gt_mask, gt_masks, gt_bboxes):
+    def filter_inputs(self, image, gt_masks, gt_bboxes):
         return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
 
     def read_transform_train(self, idx):
-        image, mask, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32, tf.float32])
-        return image, mask, masks, bboxes
+        image, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32])
+        return image, masks, bboxes
 
     def read_transform_val(self, idx):
-        image, mask, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32, tf.float32])
-        return image, mask, masks, bboxes
+        image, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32])
+        return image, masks, bboxes
     
     def initilize_train_ds(self):
         if self.shuffle:
@@ -89,25 +89,23 @@ class DataLoader(object):
     
     def _single_input_generator_train(self, index):
         [video, frame_id] = self.annotation_train[index]
-        image, masks, mini_masks, bboxes, good_sample = self._data_generator(video, frame_id)
+        image, masks, bboxes, good_sample = self._data_generator(video, frame_id)
         if good_sample:
             if self.augment:
                 image, masks, bboxes = data_augment(image, masks, bboxes)
             image, masks, bboxes = data_preprocess(image, bboxes, masks)
-            mini_masks = mini_masks_generator(masks, bboxes)
-            masks, mini_masks, bboxes = data_check(masks, mini_masks, bboxes)
-            masks, mini_masks, bboxes = data_pad(masks, mini_masks, bboxes)
-        return image, masks, mini_masks, bboxes
+            masks, bboxes = data_check(masks, bboxes)
+            masks, bboxes = data_pad(masks, bboxes)
+        return image, masks, bboxes
     
     def _single_input_generator_val(self, index):    
         [video, frame_id] = self.annotation_val[index]
-        image, masks, mini_masks, bboxes, good_sample = self._data_generator(video, frame_id)
+        image, masks, bboxes, good_sample = self._data_generator(video, frame_id)
         if good_sample:
             image, masks, bboxes = data_preprocess(image, bboxes, masks)
-            mini_masks = mini_masks_generator(masks, bboxes)
-            masks, mini_masks, bboxes = data_check(masks, mini_masks, bboxes)
-            masks, mini_masks, bboxes = data_pad(masks, mini_masks, bboxes)
-        return image, masks, mini_masks, bboxes
+            masks, bboxes = data_check(masks, bboxes)
+            masks, bboxes = data_pad(masks, bboxes)
+        return image, masks, bboxes
     
     def _data_generator(self, video, frame_id):
         frame_name = video['f_l'][frame_id]
@@ -137,12 +135,10 @@ class DataLoader(object):
                         continue
             bboxes = np.stack(bboxes,axis=0) # if bboxes = [] gives an exception --ok 
             masks = np.stack(masks,axis=0)
-            mini_masks = None
             good_sample = True
         except: # image not found or no valid bboxes or not valid masks, use light tipe to speed up
             image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
             bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.uint8) # bbox + pid
             masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.uint8)
-            mini_masks = np.zeros((cfg.MAX_INSTANCES, cfg.MASK_SIZE, cfg.MASK_SIZE), dtype = np.uint8)
             good_sample = False
-        return image, masks, mini_masks, bboxes, good_sample
+        return image, masks, bboxes, good_sample

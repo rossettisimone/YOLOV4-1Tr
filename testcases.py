@@ -124,7 +124,7 @@ def test_tf_mask_transform(NUM_TESTS=100, verbose = 0):
     from PIL import Image
     from utils import preprocess_mrcnn,bbox_iou
     ds = DataLoader(shuffle=True, augment=False)
-    iterator = ds.train_ds.unbatch().batch(1).__iter__()
+    iterator = ds.train_ds.unbatch().batch(2).__iter__()
 
     def plot(bbox1,bbox2):
         b1x = np.array([bbox1[0],bbox1[2],bbox1[2],bbox1[0],bbox1[0]])
@@ -148,7 +148,7 @@ def test_tf_mask_transform(NUM_TESTS=100, verbose = 0):
 
         data = iterator.next()
         
-        image, gt_mask, gt_masks, gt_bboxes = data
+        image, gt_masks, gt_bboxes = data
         proposals = gt_bboxes[...,:4]/cfg.TRAIN_SIZE
         noise = tf.random.uniform(proposals.shape,0.8,1.2)# avoid exit the IOU threshold
         proposals *= noise
@@ -162,7 +162,7 @@ def test_tf_mask_transform(NUM_TESTS=100, verbose = 0):
     
         for i in range(proposals.shape[1]):
             if tf.greater(tf.reduce_sum(gt_bboxes[0,i:i+1,:4]),0.0):
-            #    plt.imshow(draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'return'))
+                plt.imshow(draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'return'))
             #    plt.show()
                 iou = bbox_iou(gt_bboxes[0,i:i+1],proposals[0,i:i+1], x1y1x2y2 = True)
                 print('IOU: ',iou[0,0].numpy())

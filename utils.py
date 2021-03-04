@@ -55,7 +55,7 @@ def mask_clamp(mask):
 def read_image(img_path):
     return Image.open(img_path)
 
-def data_check( masks, mini_masks, bboxes):#check consistency of bbox after data augmentation: dimension and ratio
+def data_check( masks, bboxes):#check consistency of bbox after data augmentation: dimension and ratio
     width = bboxes[...,2] - bboxes[...,0]
     height = bboxes[...,3] - bboxes[...,1]
     mask = (width > cfg.MIN_BOX_DIM*cfg.TRAIN_SIZE) \
@@ -64,34 +64,16 @@ def data_check( masks, mini_masks, bboxes):#check consistency of bbox after data
         * ((height/width)>cfg.MIN_BOX_RATIO)
     bboxes = bboxes[mask]
     masks = masks[mask]
-    mini_masks = mini_masks[mask]
-    return masks, mini_masks, bboxes
+    return masks, bboxes
 
-def data_pad( masks, mini_masks, bboxes):
+def data_pad( masks, bboxes):
     bboxes_padded = np.zeros(( cfg.MAX_INSTANCES,5))
     bboxes_padded[:,4]=-1
     masks_padded = np.zeros(( cfg.MAX_INSTANCES,masks.shape[1],masks.shape[2]))
-    mini_masks_padded = np.zeros(( cfg.MAX_INSTANCES,mini_masks.shape[1],mini_masks.shape[2]))
     min_bbox = min(bboxes.shape[0],  cfg.MAX_INSTANCES)
     bboxes_padded[:min_bbox,...]=bboxes[:min_bbox,...]
     masks_padded[:min_bbox,...]=masks[:min_bbox,...]
-    mini_masks_padded[:min_bbox,...]=mini_masks[:min_bbox,...]
-    return masks_padded, mini_masks_padded, bboxes_padded
-    
-def mini_masks_generator( masks, bboxes):
-    masks_resized = []
-    for mask, bbox in zip(masks, bboxes):
-        try:
-            mask = Image.fromarray(mask[bbox[1]:bbox[3],bbox[0]:bbox[2]])
-        except:
-            mask = Image.fromarray(mask)
-        mask = mask.resize((cfg.MASK_SIZE,cfg.MASK_SIZE), Image.ANTIALIAS)
-        mask = np.clip(mask,0,1)
-        mask = np.round(mask)
-        masks_resized.append(mask)
-
-    masks_resized = np.stack(masks_resized,axis=0)
-    return masks_resized
+    return masks_padded, bboxes_padded
     
 def data_preprocess( image, gt_boxes, masks):
     ih, iw    = (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE)
@@ -809,6 +791,21 @@ def mask_scale_and_transle(proposal_gt_bbox_gt_mask):
     target_mask = tf.scatter_nd(targets[...,tf.newaxis],cropped_and_padded,(cfg.MAX_INSTANCES,cfg.MASK_SIZE,cfg.MASK_SIZE))
     return target_mask
 
+def crop_and_resize(proposal_gt_bbox_gt_mask):
+    proposal, target_class_id, target_mask = proposal_gt_bbox_gt_mask
+    targets = tf.where(tf.greater(target_class_id,0))[:,0]
+    proposals_ = tf.gather(proposal, targets, axis=0)
+    x1, y1, x2, y2 = tf.unstack(xywh2xyxy(proposals_[...,:4]), axis=-1)
+    proposals_ = tf.concat([y1[...,tf.newaxis],x1[...,tf.newaxis],y2[...,tf.newaxis],x2[...,tf.newaxis]],axis=-1)
+    target_mask = tf.gather(target_mask, targets, axis=0)
+    box_indices = tf.range((tf.shape(targets)[0]),dtype=tf.int32)
+    target_mask = tf.image.crop_and_resize(target_mask[...,tf.newaxis], proposals_,\
+                                           box_indices = box_indices, crop_size=(cfg.MASK_SIZE,cfg.MASK_SIZE))[...,0]
+    target_mask = tf.round(target_mask)
+    target_mask = tf.clip_by_value(target_mask,0.0,1.0)
+    target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(cfg.MAX_INSTANCES,cfg.MASK_SIZE,cfg.MASK_SIZE))
+    return target_mask
+    
 def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     """ target_bboxs: [batch, num_rois, (dx, dy, log(dw), log(dh))]
      target_class_ids: [batch, num_rois]. Integer class IDs.
@@ -826,7 +823,7 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     target_bboxs = tf.map_fn(preprocess_target_bbox, (proposals, gt_bboxes, target_indices), fn_output_signature=tf.float32)
     target_masks = tf.map_fn(preprocess_target_mask, (proposals, gt_masks, target_indices), fn_output_signature=tf.float32)
     
-    target_masks = tf.cond(tf.greater(tf.reduce_sum(target_class_ids),0), lambda: tf.map_fn(mask_scale_and_transle, (proposals, target_class_ids, target_bboxs, target_masks), fn_output_signature=tf.float32),lambda: target_masks)
+    target_masks = tf.cond(tf.greater(tf.reduce_sum(target_class_ids),0), lambda: tf.map_fn(crop_and_resize, (proposals, target_class_ids, target_masks), fn_output_signature=tf.float32),lambda: target_masks)
     target_class_ids = tf.stop_gradient(target_class_ids)
     target_bboxs = tf.stop_gradient(target_bboxs)
     target_masks = tf.stop_gradient(target_masks)
