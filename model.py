@@ -38,9 +38,7 @@ def get_model(pretrained_backbone=True):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
     backbone = cspdarknet53_graph(input_layer) # may try a smaller backbone? backbone = cspdarknet53_tiny(input_layer)
     neck = yolov4_plus1_graph(backbone)
-    # neck = panet_fpn_graph(backbone)
     rpn_predictions, rpn_embeddings = yolov4_plus1_decode_graph(neck)
-    # rpn_predictions, rpn_embeddings = yolov4_plus1_panet_fpn_decode_graph(neck)
     rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions)
     pooled_rois_classifier = PyramidROIAlign_AFP((cfg.POOL_SIZE, cfg.POOL_SIZE),name="roi_align_classifier")([rpn_proposals[...,:4],rpn_embeddings])
     pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_embeddings])
@@ -50,14 +48,14 @@ def get_model(pretrained_backbone=True):
     model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_embeddings, \
                                                 rpn_proposals, mrcnn_class_logits, \
                                                 mrcnn_class, mrcnn_bbox, mrcnn_mask])
-    model.s_c = tf.Variable(initial_value=0.0, trainable=True)
-    model.s_r = tf.Variable(initial_value=0.0, trainable=True)
-    model.s_mc = tf.Variable(initial_value=0.0, trainable=True)
-    model.s_mr = tf.Variable(initial_value=0.0, trainable=True)
-    model.s_mm = tf.Variable(initial_value=0.0, trainable=True)
+    model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
+    model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
+    model.s_mc = tf.Variable(initial_value=0.0, trainable=True, name = 's_mc')
+    model.s_mr = tf.Variable(initial_value=0.0, trainable=True, name = 's_mr')
+    model.s_mm = tf.Variable(initial_value=0.0, trainable=True, name = 's_mm')
     if pretrained_backbone:
         load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
-        freeze_backbone(model)
+#        freeze_backbone(model)
     return model
 
 def train_step(model, data, optimizer):

@@ -15,6 +15,7 @@ from compute_ap import compute_ap_range
 import skimage.transform
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor
+import tensorflow_addons as tfa
 
 ###############################################################################################
 ####################################   PREPROCESSING   ########################################
@@ -303,7 +304,7 @@ def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
 
     if np.any(bboxs is not None):
         if np.any(conf_id is None):
-            conf_id = tf.zeros_like(bboxs)[...,0]
+            conf_id = np.arange(len(bboxs))
         for i,(bbox,conf) in enumerate(zip(bboxs, conf_id)):
             if np.any(bbox>0):
                 draw.rectangle(bbox, outline = colors[i%len(colors)]) 
@@ -739,12 +740,12 @@ def preprocess_target_bbox(proposal_gt_bbox):
         gt_bbox: [num_gt_bbox, (x, y, w, h)] """
     proposal, gt_bbox, gt_indices = proposal_gt_bbox
     non_zero_proposals = tf.not_equal(tf.reduce_sum(proposal,axis=-1),0.0)
-    valid_indices = tf.squeeze(tf.where(non_zero_proposals),axis=-1)
+    valid_indices = tf.where(non_zero_proposals)[...,0]
     valid_proposals = tf.gather(proposal, valid_indices, axis=0)
     assigned_gt_bboxes = tf.gather(gt_bbox,gt_indices,axis=0)
     valid_gt_bboxes = tf.gather(assigned_gt_bboxes,valid_indices, axis=0)
     encoded_delta = encode_delta(valid_gt_bboxes, valid_proposals)
-    non_valid_indices = tf.squeeze(tf.where(tf.logical_not(non_zero_proposals)),axis=-1)
+    non_valid_indices = tf.where(tf.logical_not(non_zero_proposals))[...,0]
     non_valid_gt_bboxes = tf.gather(proposal,non_valid_indices)
     target_bbox = tf.concat([encoded_delta, non_valid_gt_bboxes], axis=0)
     return target_bbox
@@ -754,8 +755,8 @@ def preprocess_target_mask(proposal_gt_mask):
         gt_mask: [num_gt_bbox, mask_dim, mask_dim] """
     proposal, gt_mask, gt_indices = proposal_gt_mask
     non_zero_proposals = tf.not_equal(tf.reduce_sum(proposal,axis=-1),0.0)
-    valid_indices = tf.squeeze(tf.where(non_zero_proposals),axis=-1)
-    non_valid_indices = tf.squeeze(tf.where(tf.logical_not(non_zero_proposals)),axis=-1)
+    valid_indices = tf.where(non_zero_proposals)[...,0]
+    non_valid_indices = tf.where(tf.logical_not(non_zero_proposals))[...,0]
     assigned_gt_masks = tf.gather(gt_mask,gt_indices,axis=0)
     valid_gt_masks = tf.gather(assigned_gt_masks, valid_indices, axis=0)
     non_valid_gt_masks = tf.gather(tf.zeros_like(assigned_gt_masks),non_valid_indices)
@@ -776,24 +777,60 @@ def preprocess_target_indices(proposal_gt_mask):
     return target_indices, target_class_ids 
 
 
+def mask_scale_and_transle(proposal_gt_bbox_gt_mask):
+    proposal, target_class_id, target_bbox, target_mask = proposal_gt_bbox_gt_mask
+    targets = tf.where(tf.greater(target_class_id,0))[:,0]
+    proposals_ = tf.gather(proposal, targets, axis=0)
+    target_bbox_ = tf.gather(target_bbox, targets, axis=0)
+    target_masks_ = tf.gather(target_mask, targets, axis=0)
+    target_bbox_ = decode_delta(target_bbox_, proposals_)
+    xb, yb, wb, hb = tf.unstack(tf.round(target_bbox_[...,:4]*cfg.TRAIN_SIZE),axis=-1)
+    xp, yp, wp, hp = tf.unstack(tf.round(proposals_[...,:4]*cfg.TRAIN_SIZE),axis=-1)
+    wm, hm = cfg.MASK_SIZE, cfg.MASK_SIZE
+    # translation
+    a2 = (wp/wb*(xp-xb)+wb/2*(1-wp/wb))*wm/wb
+    b2 = (hp/hb*(yp-yb)+hb/2*(1-hp/hb))*hm/hb
+    #scaling
+    a0 = wp/wb
+    b1 = hp/hb
+    a0 = a0[...,tf.newaxis]
+    b1 = b1[...,tf.newaxis]
+    a2 = a2[...,tf.newaxis]
+    b2 = b2[...,tf.newaxis]
+    a1 = b0 = c0 = c1 = tf.zeros_like(a0)
+    transforms = tf.concat([a0, a1, a2, b0, b1, b2, c0, c1],axis=-1)
+    # coeffs: [a0, a1, a2, b0, b1, b2, c0, c1]
+    # transformation: (x', y') = ((a0 x + a1 y + a2) / k, 
+    #           (b0 x + b1 y + b2) / k), where k = c0 x + c1 y + 1
+    cropped_and_padded = tfa.image.transform(
+                            images = target_masks_[...,tf.newaxis],
+                            transforms =transforms,
+                            interpolation = 'bilinear')[...,0]
+    cropped_and_padded = tf.round(cropped_and_padded)
+    cropped_and_padded = tf.clip_by_value(cropped_and_padded,0.0,1.0)
+    target_mask = tf.scatter_nd(targets[...,tf.newaxis],cropped_and_padded,(cfg.MAX_INSTANCES,cfg.MASK_SIZE,cfg.MASK_SIZE))
+    return target_mask
+
 def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
-    """ target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
+    """ target_bboxs: [batch, num_rois, (dx, dy, log(dw), log(dh))]
      target_class_ids: [batch, num_rois]. Integer class IDs.
      target_masks: [batch, num_rois, height, width].
         A float32 tensor of values 0 or 1. """
     gt_bboxes = gt_bboxes[...,:4]
     gt_bboxes /= cfg.TRAIN_SIZE
-    # gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
+#    gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
     gt_bboxes = xyxy2xywh(gt_bboxes)
     proposals = tf.stop_gradient(proposals)
     proposals = proposals[...,:4]
-    # proposals = tf.clip_by_value(proposals, 0.0, 1.0) # redundant
+#    proposals = tf.clip_by_value(proposals, 0.0, 1.0) # redundant
     proposals = xyxy2xywh(proposals)  
     target_indices, target_class_ids = tf.map_fn(preprocess_target_indices, (proposals, gt_bboxes), fn_output_signature=(tf.int64,tf.int64))
-    target_bbox = tf.map_fn(preprocess_target_bbox, (proposals, gt_bboxes, target_indices), fn_output_signature=tf.float32)
+    target_bboxs = tf.map_fn(preprocess_target_bbox, (proposals, gt_bboxes, target_indices), fn_output_signature=tf.float32)
     target_masks = tf.map_fn(preprocess_target_mask, (proposals, gt_masks, target_indices), fn_output_signature=tf.float32)
+    
+    target_masks = tf.cond(tf.greater(tf.reduce_sum(target_class_ids),0), lambda: tf.map_fn(mask_scale_and_transle, (proposals, target_class_ids, target_bboxs, target_masks), fn_output_signature=tf.float32),lambda: target_masks)
     target_class_ids = tf.stop_gradient(target_class_ids)
-    target_bbox = tf.stop_gradient(target_bbox)
+    target_bboxs = tf.stop_gradient(target_bboxs)
     target_masks = tf.stop_gradient(target_masks)
 
-    return target_class_ids, target_bbox, target_masks
+    return target_class_ids, target_bboxs, target_masks
