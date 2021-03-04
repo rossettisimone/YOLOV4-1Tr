@@ -304,7 +304,7 @@ def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
 
     if np.any(bboxs is not None):
         if np.any(conf_id is None):
-            conf_id = tf.zeros_like(bboxs)[...,0]
+            conf_id = np.arange(len(bboxs))
         for i,(bbox,conf) in enumerate(zip(bboxs, conf_id)):
             if np.any(bbox>0):
                 draw.rectangle(bbox, outline = colors[i%len(colors)]) 
@@ -775,34 +775,40 @@ def preprocess_target_indices(proposal_gt_mask):
     return target_indices, target_class_ids 
 
 
-def mask_crop_and_pad(proposal_gt_bbox_gt_mask):
+def mask_scale_and_transle(proposal_gt_bbox_gt_mask):
     proposal, target_class_id, target_bbox, target_mask = proposal_gt_bbox_gt_mask
     targets = tf.where(tf.greater(target_class_id,0))[:,0]
     proposals_ = tf.gather(proposal, targets, axis=0)
     target_bbox_ = tf.gather(target_bbox, targets, axis=0)
     target_masks_ = tf.gather(target_mask, targets, axis=0)
     target_bbox_ = decode_delta(target_bbox_, proposals_)
-    scaling = proposals_[...,2:4]/target_bbox_[...,2:4]
-    transl = (proposals_[...,:2]-target_bbox_[...,:2])*cfg.MASK_SIZE*2-scaling/2#-(target_bbox_[...,2:4]-proposals_[...,2:4])*1/scaling
-    a0 = scaling[...,0][...,tf.newaxis]
-    a2 = transl[...,0][...,tf.newaxis]
-    b1 = scaling[...,1][...,tf.newaxis]
-    b2 = transl[...,1][...,tf.newaxis] # remember x increase to right and y increase going down
+    xb, yb, wb, hb = tf.unstack(tf.round(target_bbox_[...,:4]*cfg.TRAIN_SIZE),axis=-1)
+    xp, yp, wp, hp = tf.unstack(tf.round(proposals_[...,:4]*cfg.TRAIN_SIZE),axis=-1)
+    wm, hm = cfg.MASK_SIZE, cfg.MASK_SIZE
+    # translation
+    a2 = (wp/wb*(xp-xb)+wb/2*(1-wp/wb))*wm/wb
+    b2 = (hp/hb*(yp-yb)+hb/2*(1-hp/hb))*hm/hb
+    #scaling
+    a0 = wp/wb
+    b1 = hp/hb
+    a0 = a0[...,tf.newaxis]
+    b1 = b1[...,tf.newaxis]
+    a2 = a2[...,tf.newaxis]
+    b2 = b2[...,tf.newaxis]
     a1 = b0 = c0 = c1 = tf.zeros_like(a0)
     transforms = tf.concat([a0, a1, a2, b0, b1, b2, c0, c1],axis=-1)
-    #    coeffs: [a0, a1, a2, b0, b1, b2, c0, c1]
-    #    transformation: (x', y') = ((a0 x + a1 y + a2) / k, 
+    # coeffs: [a0, a1, a2, b0, b1, b2, c0, c1]
+    # transformation: (x', y') = ((a0 x + a1 y + a2) / k, 
     #           (b0 x + b1 y + b2) / k), where k = c0 x + c1 y + 1
     cropped_and_padded = tfa.image.transform(
                             images = target_masks_[...,tf.newaxis],
                             transforms =transforms,
-                            interpolation = 'nearest')[...,0]
-
+                            interpolation = 'bilinear')[...,0]
     cropped_and_padded = tf.round(cropped_and_padded)
     cropped_and_padded = tf.clip_by_value(cropped_and_padded,0.0,1.0)
-    target_mask = tf.scatter_nd(targets[...,tf.newaxis],cropped_and_padded,target_mask.shape.as_list())
+    target_mask = tf.scatter_nd(targets[...,tf.newaxis],cropped_and_padded,(cfg.MAX_INSTANCES,cfg.MASK_SIZE,cfg.MASK_SIZE))
     return target_mask
-    
+
 def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     """ target_bboxs: [batch, num_rois, (dx, dy, log(dw), log(dh))]
      target_class_ids: [batch, num_rois]. Integer class IDs.
@@ -819,93 +825,10 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     target_indices, target_class_ids = tf.map_fn(preprocess_target_indices, (proposals, gt_bboxes), fn_output_signature=(tf.int64,tf.int64))
     target_bboxs = tf.map_fn(preprocess_target_bbox, (proposals, gt_bboxes, target_indices), fn_output_signature=tf.float32)
     target_masks = tf.map_fn(preprocess_target_mask, (proposals, gt_masks, target_indices), fn_output_signature=tf.float32)
-    target_masks = tf.map_fn(mask_crop_and_pad, (proposals, target_class_ids, target_bboxs, target_masks), fn_output_signature=tf.float32)
+    
+    target_masks = tf.cond(tf.greater(tf.reduce_sum(target_class_ids),0), lambda: tf.map_fn(mask_scale_and_transle, (proposals, target_class_ids, target_bboxs, target_masks), fn_output_signature=tf.float32),lambda: target_masks)
     target_class_ids = tf.stop_gradient(target_class_ids)
     target_bboxs = tf.stop_gradient(target_bboxs)
     target_masks = tf.stop_gradient(target_masks)
 
     return target_class_ids, target_bboxs, target_masks
-#
-#plt.imshow(target_masks[0,0])
-#
-#
-#def test():
-#    from loader import DataLoader
-#    #from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels
-#    import matplotlib.pyplot as plt
-#    #from utils import decode_labels 
-#    import config as cfg
-#    ds = DataLoader(shuffle=True, augment=False)
-#    iterator = ds.train_ds.unbatch().batch(1).__iter__()
-#    data = iterator.next()
-#    image, gt_mask, gt_masks, gt_bboxes = data
-#    proposals = gt_bboxes[...,:4]/cfg.TRAIN_SIZE
-#    proposals += [-0.05,-0.05,-0.05,-0.05]
-#    #label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
-#    #p = [label_2,label_3,label_4,label_5]
-#    #proposals = decode_labels(p)
-#    #proposals += 0.1
-#    #gt_bboxes
-#
-#    
-#    proposal, gt_bbox = proposals[0], gt_bboxes[0]
-#    #
-#
-##    proposal, target_class_id, target_bbox, target_mask = proposals[0], target_class_ids[0], target_bboxs[0], target_masks[0]
-#    #
-#    def plot(bbox1,bbox2):
-#        b1x = np.array([bbox1[0],bbox1[2],bbox1[2],bbox1[0],bbox1[0]])
-#        b1y = np.array([bbox1[1],bbox1[1],bbox1[3],bbox1[3],bbox1[1]])
-#        b2x = np.array([bbox2[0],bbox2[2],bbox2[2],bbox2[0],bbox2[0]])
-#        b2y = np.array([bbox2[1],bbox2[1],bbox2[3],bbox2[3],bbox2[1]])
-#        x1 = np.maximum(bbox2[0], bbox1[0])
-#        y1 = np.maximum(bbox2[1], bbox1[1])
-#        x2 = np.minimum(bbox2[2], bbox1[2])
-#        y2 = np.minimum(bbox2[3], bbox1[3])
-#        plt.plot(b1x,b1y,'g-')
-#        plt.plot(b2x,b2y,'r-')
-#        plt.plot([x1,x2],[y1,y2],'bo')
-#        plt.xlim(0,416)
-#        plt.ylim(0,416)
-#        plt.gca().invert_yaxis()
-#
-#    #
-#    data = iterator.next()
-#    image, gt_mask, gt_masks, gt_bboxes = data
-#    proposals = gt_bboxes[...,:4]/cfg.TRAIN_SIZE
-#    proposals += [-0.05,-0.05,-0.05,-0.05]
-#    proposals *=cfg.TRAIN_SIZE
-#
-#    bbox_iou(gt_bboxes[0,0:1],proposals[0,0:1], x1y1x2y2 = True)
-#    plot((gt_bboxes[0,0]),(proposals[0,0]))
-#    
-#    m = gt_masks[0,0].numpy()
-#    plt.imshow(m)
-#    from PIL import Image
-#    bb = np.array(gt_bboxes[0,0,:4].numpy(),np.int32)
-#    hw = np.round((bb[2:4]-bb[:2]))
-#    n = np.round(Image.fromarray(m).resize(tuple(hw)))
-#    plt.imshow(n)
-#    p = np.array(proposals[0,0,:4],np.int32)
-#    hhww = np.array((p[2:4]-p[:2]),np.int32)
-#    c = np.zeros((hhww[1],hhww[0]))
-#    
-#    x1 = np.maximum(bb[0], p[0])
-#    y1 = np.maximum(bb[1], p[1])
-#    x2 = np.minimum(bb[2], p[2])
-#    y2 = np.minimum(bb[3], p[3])
-#    
-#    xs = max(p[0],x1) - p[0]
-#    ys = max(p[1],y1) - p[1] 
-#    xe = min(p[2],x2) - p[0]
-#    ye = min(p[3],y2) - p[1]
-#    
-#    xss = max(bb[0],x1) - bb[0]
-#    yss = max(bb[1],y1) - bb[1]
-#    xee = min(bb[2],x2) - bb[0]
-#    yee = min(bb[3],y2) - bb[1]
-#    
-#    c[ys:ye,xs:xe] = n[yss:yee,xss:xee]
-#    plt.imshow(c)
-#    nn = np.round(Image.fromarray(c).resize((28,28)))
-#    plt.imshow(nn)
