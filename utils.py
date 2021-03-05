@@ -639,7 +639,6 @@ def decode_prediction(prediction, anchors, stride):
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC]) # b x nBB x (4 + 1 + 1 + 208) rois
     proposal = check_proposals_tensor(proposal)
-    proposal = nms_proposals_tensor(proposal) 
     return proposal
 
 
@@ -670,9 +669,7 @@ def check_proposals_tensor(proposal):
     indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable=True)
 
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
-    k_proposal = tf.range(cfg.PRE_NMS_LIMIT)
-    k_proposal = tf.stop_gradient(k_proposal)
-    proposal = tf.gather(proposal, k_proposal, axis=1) # automatic zero padding
+    proposal = nms_proposals_tensor(proposal, size = cfg.PRE_NMS_LIMIT) # automatic zero padding
     return proposal
 
 def check_proposals(proposal):
@@ -688,21 +685,18 @@ def check_proposals(proposal):
     indices = tf.squeeze(tf.where(mask),axis=-1)
     proposal = tf.gather(proposal,indices, axis=0)
 
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
-    
-    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING')
+    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable = True)
     proposal = tf.gather(proposal,indices, axis=0)
     
-    proposal = tf.gather(proposal,tf.range(cfg.PRE_NMS_LIMIT), axis=0) # automatic zero padding only on GPU
+    proposal = nms_proposals_tensor(proposal[None], size = cfg.PRE_NMS_LIMIT)[0] # automatic zero padding
 
     return proposal
     
-def nms_proposals_tensor(proposal):
+def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
     """This function compute nms proposals without iterating over the batch """
     proposal, conf, *_ = tf.image.combined_non_max_suppression(
-            proposal[...,:4][:,:,tf.newaxis,:], proposal[...,4][...,tf.newaxis], max_output_size_per_class=cfg.MAX_PROP, \
-            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+            proposal[...,:4][:,:,tf.newaxis,:], proposal[...,4][...,tf.newaxis], max_output_size_per_class=size, \
+            max_total_size=size, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
 
     proposal = tf.concat([proposal,conf[...,tf.newaxis]], axis=-1)    
     return proposal

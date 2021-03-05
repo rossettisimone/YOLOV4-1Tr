@@ -70,34 +70,37 @@ def test_encode_decode():
     from utils import draw_bbox, encode_labels
     from utils import preprocess_mrcnn
     from utils import decode_target_mask
-    from utils import decode_labels 
+    from utils import decode_labels,crop_and_resize,xyxy2xywh
     import numpy as np
     import config as cfg
     
     ds = DataLoader(shuffle=True, augment=True)
     iterator = ds.train_ds.unbatch().batch(1).__iter__()
     data = iterator.next()
-    image, gt_mask, gt_masks, gt_bboxes = data
-    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = np.arange(20), mode= 'PIL')
-    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    image, gt_masks, gt_bboxes = data
+    gt_masks_ = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+    draw_bbox(image[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks_[0],(1,2,0)).numpy(), conf_id = np.arange(20), mode= 'PIL')
+    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks_), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     proposals = decode_labels([label_2,label_3,label_4,label_5])
-    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE,masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+    draw_bbox(image[0].numpy(), prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE,masks=tf.transpose(gt_masks_[0],(1,2,0)).numpy(), conf_id = np.arange(20), mode= 'PIL')
     target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks)
     bbox_mrcnn, conf_mrcnn, mask_mrcnn = decode_target_mask(proposals[0], target_class_ids[0], target_bbox[0], target_masks[0])
-    draw_bbox(image[0].numpy(), bboxs = bbox_mrcnn[...,:4],masks=mask_mrcnn, conf_id = np.arange(20), mode= 'PIL')
+    draw_bbox(image[0].numpy(), prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, bboxs = bbox_mrcnn[...,:4],masks=mask_mrcnn, conf_id = np.arange(20), mode= 'PIL')
     
     
 def test_encode_decode_loss():
     from loader import DataLoader
     from utils import encode_labels
     from utils import preprocess_mrcnn
-    from utils import decode_labels 
-    
+    from utils import decode_labels,crop_and_resize,xyxy2xywh
+    import config as cfg
+
     ds = DataLoader(shuffle=True, augment=True)
     iterator = ds.train_ds.unbatch().batch(1).__iter__()
     data = iterator.next()
-    image, gt_mask, gt_masks, gt_bboxes = data
-    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    image, gt_masks, gt_bboxes = data
+    gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     proposals = decode_labels([label_2,label_3,label_4,label_5])
     target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks)
     from model import mrcnn_class_loss_graph,mrcnn_bbox_loss_graph,mrcnn_mask_loss_graph
@@ -113,16 +116,18 @@ def test_encode_decode_loss():
     
 
 
-def test_tf_mask_transform(NUM_TESTS=100, verbose = 0):
+def test_tf_mask_transform(NUM_TESTS=10, verbose = 0):
 
     from loader import DataLoader
-#    from utils import draw_bbox
+    from utils import draw_bbox
     import matplotlib.pyplot as plt
     import numpy as np
     import config as cfg
     import tensorflow as tf
     from PIL import Image
     from utils import preprocess_mrcnn,bbox_iou
+    from utils import decode_labels,crop_and_resize,xyxy2xywh
+
     ds = DataLoader(shuffle=True, augment=False)
     iterator = ds.train_ds.unbatch().batch(2).__iter__()
 
@@ -149,20 +154,22 @@ def test_tf_mask_transform(NUM_TESTS=100, verbose = 0):
         data = iterator.next()
         
         image, gt_masks, gt_bboxes = data
+        gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
         proposals = gt_bboxes[...,:4]/cfg.TRAIN_SIZE
         noise = tf.random.uniform(proposals.shape,0.8,1.2)# avoid exit the IOU threshold
         proposals *= noise
         target_class_ids_tf, _, target_masks_tf = preprocess_mrcnn(proposals, gt_bboxes, gt_masks)
         
         
-        image, gt_mask, gt_masks, gt_bboxes = data
+        image, gt_masks, gt_bboxes = data
+        gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
         proposals = gt_bboxes[...,:4]/cfg.TRAIN_SIZE
         proposals *= noise
         proposals *=cfg.TRAIN_SIZE
     
         for i in range(proposals.shape[1]):
             if tf.greater(tf.reduce_sum(gt_bboxes[0,i:i+1,:4]),0.0):
-                plt.imshow(draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'return'))
+#                plt.imshow(draw_bbox(image[0].numpy(), prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, bboxs = gt_bboxes[0].numpy(), prop = proposals, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'return'))
             #    plt.show()
                 iou = bbox_iou(gt_bboxes[0,i:i+1],proposals[0,i:i+1], x1y1x2y2 = True)
                 print('IOU: ',iou[0,0].numpy())

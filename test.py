@@ -92,7 +92,7 @@ import matplotlib.pyplot as plt
 
 ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
-for i in range(100):
+for i in range(10):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
@@ -121,7 +121,7 @@ model.trainable = False
 
 model.summary()
 
-model.outputs
+#model.outputs
 
 
 #%%
@@ -243,7 +243,7 @@ for data in iterator.take(10):
 #    print(i/sec)
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-#    show_infer(data_, predictions)
+    show_infer(data_, predictions)
     AP += show_mAP(data_, predictions)
     mAP = AP/i    
     print(mAP)
