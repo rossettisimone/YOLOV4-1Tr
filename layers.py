@@ -13,76 +13,58 @@ from backbone import cspdarknet53_graph
 import numpy as np
 from group_norm import GroupNormalization as GroupNorm
 
-def panet_fpn_graph(input_layers):
-        
-    b_2, b_3, b_4, b_5 = input_layers 
-    
-    # Top - Down FPN
-    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_5))
-    p_4 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_5),\
-                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_4))])
-    p_3 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_4),\
-                        GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_3))])
-    p_2 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_3),\
-                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_2))])
-    
-    p_2 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_2))
-    p_3 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_3))
-    p_4 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_4))
-    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_5))
+############################################################
+#  Support layers
+############################################################
 
-    # Bottom-up path augmentation
-    n_2 = p_2
+def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky', name=None):
+    """
+    Support Conv2D layer
+    """
+    if downsample:
+        x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
+        padding = 'valid'
+        strides = 2
+    else:
+        strides = 1
+        padding = 'same'
+    x = tf.keras.layers.Conv2D(filters=filters, kernel_size = kernel_size, strides=strides, padding=padding,
+                                  use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                  kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                                  bias_initializer=tf.constant_initializer(0.),name=name)(x)
+    if bn: x = tf.keras.layers.BatchNormalization()(x)
     
-    n_3 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
-            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
-            tf.keras.layers.Add()([p_3, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
-            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_2)))]))))
-    n_4 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
-        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
-        tf.keras.layers.Add()([p_4, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
-        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_3)))]))))
-    n_5 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
-        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
-        tf.keras.layers.Add()([p_5, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
-        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_4)))]))))
-    
-    return n_2, n_3, n_4, n_5
+    def mish(x):
+        return x * tf.math.tanh(tf.math.softplus(x))
 
-def yolov4_plus1_panet_fpn_decode_graph(input_layer):
-    
-    n_2, n_3, n_4, n_5 = input_layer
-    
-    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
-    prediction_filters = cfg.NUM_ANCHORS * prediction_channels
-    
-    x = Conv2D(n_2, kernel_size = 3, filters = 64)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
-                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
-    
-    x = Conv2D(n_3, kernel_size = 3, filters = 128)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
-                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
-    
-    x = Conv2D(n_4, kernel_size = 3, filters = 256)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
-                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
-    
-    x = Conv2D(n_5, kernel_size = 3, filters = 512)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
-                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
-    
-    return [p_2,p_3,p_4,p_5], [n_2, n_3, n_4, n_5]
+    if activate:
+        if activate_type == "leaky":
+            x = tf.nn.leaky_relu(x, alpha=0.1)
+        elif activate_type == "relu":
+            x = tf.nn.relu(x)
+        elif activate_type == "mish":
+            x = mish(x)
+    return x
+
+############################################################
+#  YOLOV4 neck graph
+############################################################
 
 def yolov4_plus1_graph(input_layers):
+    """
+    YOLOv4 implements only 3 FPN levels and 3 bottom up path augmentation levels,
+    here a fourth level is added in order to enhance detection of small targets
+    Input:
+        b_2: [batch, train_size/stride[0], train_size/stride[0], 128]
+        b_3: [batch, train_size/stride[1], train_size/stride[1], 256]
+        b_4: [batch, train_size/stride[2], train_size/stride[2], 512]
+        b_5: [batch, train_size/stride[3], train_size/stride[3], 512]
+    Output:
+        n_2: [batch, train_size/stride[0], train_size/stride[0], 64]
+        n_3: [batch, train_size/stride[1], train_size/stride[1], 128]
+        n_4: [batch, train_size/stride[2], train_size/stride[2], 256]
+        n_5: [batch, train_size/stride[3], train_size/stride[3], 512]
+    """
     
     b_2, b_3, b_4, b_5 = input_layers 
     
@@ -161,12 +143,37 @@ def yolov4_plus1_graph(input_layers):
     n_5 = x
     
     return n_2, n_3, n_4, n_5
-    
+
+############################################################
+#  YOLOV4+1 predictions and features splitting graph
+############################################################
+
 def yolov4_plus1_decode_graph(input_layer):
+    """
+    This is a support graph which permits to split features and prediction data, 
+    Differently from YOLOv4 we produce features tensors which are used in ROI Pooling
+    to extract the mask of the targets.
+    Input:
+        n_2: [batch, train_size/stride[0], train_size/stride[0], 64]
+        n_3: [batch, train_size/stride[1], train_size/stride[1], 128]
+        n_4: [batch, train_size/stride[2], train_size/stride[2], 256]
+        n_5: [batch, train_size/stride[3], train_size/stride[3], 512]
+    Output:
+        p_2: [batch, num_anchors, train_size/stride[0], train_size/stride[0], bbox_dim+conf_dim]
+        p_3: [batch, num_anchors, train_size/stride[1], train_size/stride[1], bbox_dim+conf_dim]
+        p_4: [batch, num_anchors, train_size/stride[2], train_size/stride[2], bbox_dim+conf_dim]
+        p_5: [batch, num_anchors, train_size/stride[3], train_size/stride[3], bbox_dim+conf_dim]
+        
+        e_2: [batch, train_size/stride[0], train_size/stride[0], embedding_dim]
+        e_3: [batch, train_size/stride[1], train_size/stride[1], embedding_dim]
+        e_4: [batch, train_size/stride[2], train_size/stride[2], embedding_dim]
+        e_5: [batch, train_size/stride[3], train_size/stride[3], embedding_dim]
+        
+    """
     
     n_2, n_3, n_4, n_5 = input_layer
     
-    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
+    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS #6
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
     e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, bn=True, activate_type = 'relu')
@@ -199,8 +206,30 @@ def yolov4_plus1_decode_graph(input_layer):
     
     return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
 
+############################################################
+#  YOLOV4+1 proposals decode graph
+############################################################
+
 def yolov4_plus1_proposal_graph(predictions):
-    
+    """
+    YOLOv4 decoding is applied and shift wrt to anchors is parsed:
+        ANCHORS: 4 anchors for 4 levels, each anchors is made by width W and height H
+        STRIDES: are the strides resulting from each pyramid level, you can get dimension
+                of the features per each level by applying TRAIN_SIZE/STRIDES
+    In decode_prediction the delta mapping is inverted and for each layer 
+    proposals are checked for consistency and ordered by prediction class confidence,
+    each proposal vector is zero padded and after concatenation NMS is performed
+    (overlapping proposals are removed by confidance score).
+    Backpropagation is stopped for cutted and zeroed proposals
+    Input:
+        p_2: [batch, num_anchors, train_size/stride[0], train_size/stride[0], bbox_dim+conf_dim]
+        p_3: [batch, num_anchors, train_size/stride[1], train_size/stride[1], bbox_dim+conf_dim]
+        p_4: [batch, num_anchors, train_size/stride[2], train_size/stride[2], bbox_dim+conf_dim]
+        p_5: [batch, num_anchors, train_size/stride[3], train_size/stride[3], bbox_dim+conf_dim]
+    Output (foreground detection):
+        proposals: [batch, max_proposals, bbox+conf] 
+        
+    """
     ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
     p_2, p_3, p_4, p_5 = predictions
     d_2 = decode_prediction(p_2, ANCHORS[0], cfg.STRIDES[0])
@@ -209,19 +238,24 @@ def yolov4_plus1_proposal_graph(predictions):
     d_5 = decode_prediction(p_5, ANCHORS[3], cfg.STRIDES[3])
     proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels
     proposals = nms_proposals_tensor(proposals)
+    
     # stop backpropagation for all zero boxes, this leads to nan gradient due to log decoding
     mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)
     proposals = entry_stop_gradients(proposals, mask_non_zero_entry)
     
     return proposals
 
-def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_layers_size=cfg.FC_LAYER_SIZE):
+############################################################
+#  PANet modified MASK-RCNN box refinement graph
+############################################################
+
+def box_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=cfg.NUM_CLASSES, fc_layers_size=cfg.FC_LAYER_SIZE): # num classes + 1, 0 is background
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
     rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
           coordinates.
     feature_maps: List of feature maps from different layers of the pyramid,
-                  [P2, P3, P4, P5]. Each has a different resolution.
+                  [e_2, e_3, e_4, e_5]. Each has a different resolution.
     image_meta: [batch, (meta data)] Image details. See compose_image_meta()
     pool_size: The width of the square feature map generated from ROI Pooling.
     num_classes: number of classes, which determines the depth of the results
@@ -281,17 +315,23 @@ def fpn_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=2, fc_
 
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
-def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=2):
+############################################################
+#  PANet modified MASK-RCNN mask graph
+############################################################
+
+def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=cfg.NUM_CLASSES): # num classes + 1, 0 is background
     """Builds the computation graph of the mask head of Feature Pyramid Network.
-    rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
-          coordinates.
-    feature_maps: List of feature maps from different layers of the pyramid,
-                  [P2, P3, P4, P5]. Each has a different resolution.
-    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
-    pool_size: The width of the square feature map generated from ROI Pooling.
-    num_classes: number of classes, which determines the depth of the results
-    train_bn: Boolean. Train or freeze Batch Norm layers
-    Returns: Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
+    Params: 
+        pool_size: The width of the square feature map generated from ROI Pooling.
+        num_classes: number of classes, which determines the depth of the results
+    Input:
+        rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
+              coordinates.
+        feature_maps: List of feature maps from different layers of the pyramid,
+                      [e_2, e_3, e_4, e_5]. Each has a different resolution.
+        image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    Output: 
+        Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
     """
     # rois, feature_maps = inputs[0], inputs[1]
     # ROI Pooling
@@ -347,210 +387,6 @@ def build_fpn_mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes
 
     return x
 
-def mish(x):
-    return x * tf.math.tanh(tf.math.softplus(x))
-
-def Conv2D(x, kernel_size, filters, downsample=False, activate=True, bn=True, activate_type='leaky', name=None):
-    if downsample:
-        x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
-        padding = 'valid'
-        strides = 2
-    else:
-        strides = 1
-        padding = 'same'
-    x = tf.keras.layers.Conv2D(filters=filters, kernel_size = kernel_size, strides=strides, padding=padding,
-                                  use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                  kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                  bias_initializer=tf.constant_initializer(0.),name=name)(x)
-    if bn: x = tf.keras.layers.BatchNormalization()(x)
-    if activate:
-        if activate_type == "leaky":
-            x = tf.nn.leaky_relu(x, alpha=0.1)
-        elif activate_type == "relu":
-            x = tf.nn.relu(x)
-        elif activate_type == "mish":
-            x = mish(x)
-    return x
-
-class BatchNormalization(tf.keras.layers.BatchNormalization):
-    """
-    "Frozen state" and "inference mode" are two separate concepts.
-    `layer.trainable = False` is to freeze the layer, so the layer will use
-    stored moving `var` and `mean` in the "inference mode", and both `gama`
-    and `beta` will not be updated !
-    """
-    def call(self, x, training=False):
-        if not training:
-            training = tf.constant(False)
-        training = tf.logical_and(training, self.trainable)
-        return super().call(x, training)
-
-
-class FreezeBackbone(tf.keras.callbacks.Callback):
-    def __init__(self, n_epochs=2):
-        super().__init__()
-        self.n_epochs = n_epochs
-
-    def on_epoch_start(self, epoch, logs=None):
-        if epoch <= self.n_epochs:
-            freeze_backbone(self.model, trainable=False)
-        else:
-            freeze_backbone(self.model, trainable=True)
-
-class FreezeBatchNorm(tf.keras.callbacks.Callback):
-    def __init__(self):
-        super().__init__()
-
-    def on_epoch_start(self, epoch, logs=None):
-        freeze_batch_norm(self.model)
-
-
-def freeze_batch_norm(model, trainable = False):  
-    for layer in model.layers:
-        bn_layer_name = layer.name
-        if bn_layer_name[:10] == 'batch_norm':
-            bn_layer = model.get_layer(bn_layer_name)
-            bn_layer._trainable = trainable
-        else:
-            try:
-                bn_layer_name = layer.layer.name # TimeDistributed hides the name
-                if bn_layer_name[:10] == 'batch_norm':
-                    bn_layer = model.get_layer(bn_layer_name)
-                    bn_layer._trainable = trainable
-            except:
-                continue
-
-def freeze_backbone(model, trainable = False):
-    cutoff = 78 # 77 convolutions and batch normalizations
-    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
-    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
-    for i in range(0,cutoff):
-        k = i + conv_0
-        j = i + batch_0
-        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
-        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
-        conv_layer = model.get_layer(conv_layer_name)
-        bn_layer = model.get_layer(bn_layer_name)
-        conv_layer._trainable = trainable
-        bn_layer._trainable = trainable
-            
-def freeze_rpn(model, trainable = False):
-    cutoff = 561
-    for layer in model.layers[:cutoff]:
-        layer._trainable = trainable
-
-def fine_tuning(model):
-    out_layers = [16, 37, 58, 77]
-    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
-    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
-    for i in out_layers:
-        k = i + conv_0
-        j = i + batch_0
-        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
-        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
-        conv_layer = model.get_layer(conv_layer_name)       
-        bn_layer = model.get_layer(bn_layer_name)
-        conv_layer.trainable = True
-        bn_layer.trainable = True
-
-class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
-    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
-
-  Arguments:
-      patience: Number of epochs to wait after min has been hit. After this
-      number of no improvement, training stops.
-  """
-
-    def __init__(self, patience=0):
-        super(EarlyStoppingAtMinLoss, self).__init__()
-        self.patience = patience
-        # best_weights to store the weights at which the minimum loss occurs.
-        self.best_weights = None
-
-    def on_train_begin(self, logs=None):
-        # The number of epoch it has waited when loss is no longer minimum.
-        self.wait = 0
-        # The epoch the training stops at.
-        self.stopped_epoch = 0
-        # Initialize the best as infinity.
-        self.best = np.Inf
-
-    def on_epoch_end(self, epoch, logs=None):
-        current = logs.get("alb_total_loss")
-        if np.less(current, self.best):
-            self.best = current
-            self.wait = 0
-            # Record the best weights if current results is better (less).
-            self.best_weights = self.model.get_weights()
-        else:
-            self.wait += 1
-            if self.wait >= self.patience:
-                self.stopped_epoch = epoch
-                self.model.stop_training = True
-                print("Restoring model weights from the end of the best epoch.")
-                self.model.set_weights(self.best_weights)
-
-    def on_train_end(self, logs=None):
-        if self.stopped_epoch > 0:
-            print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
-
-
-class EarlyStoppingRPN(tf.keras.callbacks.Callback):
-    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
-
-  Arguments:
-      patience: Number of epochs to wait after min has been hit. After this
-      number of no improvement, training stops.
-  """
-
-    def __init__(self, patience1=0,patience2=0):
-        super(EarlyStoppingRPN, self).__init__()
-        self.patience1 = patience1
-        self.patience2 = patience2
-        # best_weights to store the weights at which the minimum loss occurs.
-        self.best_weights = None
-
-    def on_train_begin(self, logs=None):
-        # The number of epoch it has waited when loss is no longer minimum.
-        self.wait = 0
-        self.freeze_rpn = False
-        # The epoch the training stops at.
-        self.stopped_epoch = 0
-        # Initialize the best as infinity.
-        self.best = np.Inf
-
-    def on_epoch_end(self, epoch, logs=None):
-        current = logs.get("alb_total_loss")
-        if np.less(current, self.best):
-            self.best = current
-            self.wait = 0
-            # Record the best weights if current results is better (less).
-            self.best_weights = self.model.get_weights()
-        else:
-            self.wait += 1
-            if not self.freeze_rpn:
-                if self.wait >= self.patience1:
-                    self.wait = 0
-                    self.stopped_epoch = epoch
-                    self.freeze_rpn = True
-                    self.model.set_weights(self.best_weights) 
-                    print("Restoring model weights from the end of the best epoch.")
-            else:
-                if self.wait >= self.patience2:
-                    self.stopped_epoch = epoch
-                    self.model.stop_training = True
-                    print("Restoring model weights from the end of the best epoch.")
-                    self.model.set_weights(self.best_weights)
-
-
-    def on_epoch_start(self, epoch, logs=None):
-        if self.freeze_rpn:
-            freeze_rpn(self.model,trainable=False)
-            print('Freezed RPN')
-
-    def on_train_end(self, logs=None):
-        if self.stopped_epoch > 0:
-            print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
 
 ############################################################
 #  ROIAlign Layer
@@ -559,20 +395,18 @@ class EarlyStoppingRPN(tf.keras.callbacks.Callback):
 class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
     Params:
-    - pool_shape: [pool_height, pool_width] of the output pooled regions. Usually [7, 7]
+        pool_shape: [pool_height, pool_width] of the output pooled regions. Usually [7, 7]
     Inputs:
-    - boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized
+        boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized
              coordinates. Possibly padded with zeros if not enough
              boxes to fill the array.
-    - image_meta: [batch, (meta data)] Image details. See compose_image_meta()
-    - feature_maps: List of feature maps from different levels of the pyramid.
+        feature_maps: List of feature maps from different levels of the pyramid.
                     Each is [batch, height, width, channels]
     Output:
-    Pooled regions in the shape: [batch, num_boxes, pool_height, pool_width, channels].
-    The width and height are those specific in the pool_shape in the layer
-    constructor.
+        Pooled regions in the shape: [batch, num_boxes, pool_height, pool_width, channels].
+        The width and height are those specific in the pool_shape in the layer
+        constructor.
     """
-
     def __init__(self, pool_shape = (cfg.POOL_SIZE, cfg.POOL_SIZE), **kwargs):
         super(PyramidROIAlign_AFP, self).__init__(**kwargs)
         self.pool_shape = tuple(pool_shape)
@@ -624,18 +458,76 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     def get_output_shape(self):
         return [out.shape for out in self.call(self.get_input_shape())]
 
-class BatchNorm(tf.keras.layers.BatchNormalization):
-    """Extends the Keras BatchNormalization class to allow a central place
-    to make changes if needed.
-    Batch normalization has a negative effect on training if batches are small
-    so this layer is often frozen (via setting in Config class) and functions
-    as linear layer.
-    """
-    def call(self, inputs, training=None):
-        """
-        Note about training values:
-            None: Train BN layers. This is the normal mode
-            False: Freeze BN layers. Good when batch size is small
-            True: (don't use). Set layer in training mode even when making inferences
-        """
-        return super(self.__class__, self).call(inputs, training=training)
+
+############################################################
+#  PANet neck (not used)
+############################################################
+
+#def panet_fpn_graph(input_layers):
+#        
+#    b_2, b_3, b_4, b_5 = input_layers 
+#    
+#    # Top - Down FPN
+#    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_5))
+#    p_4 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_5),\
+#                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_4))])
+#    p_3 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_4),\
+#                        GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_3))])
+#    p_2 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_3),\
+#                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_2))])
+#    
+#    p_2 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_2))
+#    p_3 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_3))
+#    p_4 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_4))
+#    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_5))
+#
+#    # Bottom-up path augmentation
+#    n_2 = p_2
+#    
+#    n_3 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+#            tf.keras.layers.Add()([p_3, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_2)))]))))
+#    n_4 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+#        tf.keras.layers.Add()([p_4, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_3)))]))))
+#    n_5 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+#        tf.keras.layers.Add()([p_5, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_4)))]))))
+#    
+#    return n_2, n_3, n_4, n_5
+#
+#def yolov4_plus1_panet_fpn_decode_graph(input_layer):
+#    
+#    n_2, n_3, n_4, n_5 = input_layer
+#    
+#    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS
+#    prediction_filters = cfg.NUM_ANCHORS * prediction_channels
+#    
+#    x = Conv2D(n_2, kernel_size = 3, filters = 64)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    x = Conv2D(n_3, kernel_size = 3, filters = 128)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    x = Conv2D(n_4, kernel_size = 3, filters = 256)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    x = Conv2D(n_5, kernel_size = 3, filters = 512)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    return [p_2,p_3,p_4,p_5], [n_2, n_3, n_4, n_5]

@@ -188,23 +188,28 @@ def decode_proposal(proposal, mode='cut'):
         return bbox, conf
 
 def decode_mask(proposal, prob, bbox_mrcnn, mask_mrcnn, mode='keep'):
-    bbox = proposal[...,:4]
-    bbox = xyxy2xywh(bbox)
+    conf = proposal[...,4].numpy()
+    proposal = proposal[...,:4]
+    bbox = xyxy2xywh(proposal)
     bbox_mrcnn = bbox_mrcnn[...,1,:4]
     bbox_mrcnn = decode_delta(bbox_mrcnn, bbox)
     bbox_mrcnn = xywh2xyxy(bbox_mrcnn)
     bbox_mrcnn = tf.clip_by_value(bbox_mrcnn,0.0,1.0)
     bbox_mrcnn = tf.round(bbox_mrcnn*cfg.TRAIN_SIZE).numpy()
     conf_mrcnn = prob[...,1].numpy()
+    total_conf = conf * conf_mrcnn
     mask_mrcnn = mask_mrcnn[...,1]
     mask_mrcnn = tf.transpose(mask_mrcnn,(1,2,0)).numpy()
+    proposal = tf.round(proposal*cfg.TRAIN_SIZE).numpy()
     if mode == 'cut':
-        mask = conf_mrcnn>cfg.CONF_THRESH
-        pred_class_id = tf.cast(conf_mrcnn[mask]>0, tf.int32).numpy()
-        return bbox_mrcnn[mask], pred_class_id, conf_mrcnn[mask], mask_mrcnn[...,mask]
+        mask = total_conf>cfg.CONF_THRESH
+        pred_class_id = tf.cast(total_conf[mask]>0, tf.int32).numpy()
+        return proposal[mask], bbox_mrcnn[mask], pred_class_id, total_conf[mask], mask_mrcnn[...,mask]
     else:
-        pred_class_id = tf.cast(conf_mrcnn>cfg.CONF_THRESH, tf.int32).numpy()
-        return bbox_mrcnn, pred_class_id, conf_mrcnn, mask_mrcnn
+        print('rpn: ',conf)
+        print('mask: ',conf_mrcnn)
+        pred_class_id = tf.cast(total_conf>cfg.CONF_THRESH, tf.int32).numpy()
+        return proposal, bbox_mrcnn, pred_class_id, total_conf, mask_mrcnn
     
 
 def decode_target_mask(proposal, target_class_ids, target_bbox, target_masks, mode='keep'):
@@ -240,9 +245,9 @@ def show_infer(data, prediction):
     if len(prediction)>3:
         preds, embs, proposals, logits, probs, bboxes, masks = prediction
         for i in range(nB):
-            bbox_mrcnn, id_mrcnn, conf_mrcnn, mask_mrcnn = decode_mask(proposals[i], probs[i], bboxes[i], masks[i], 'cut')
+            proposals, bbox_mrcnn, id_mrcnn, conf_mrcnn, mask_mrcnn = decode_mask(proposals[i], probs[i], bboxes[i], masks[i], 'cut')
             if len(bbox_mrcnn)>0:
-                draw_bbox(image[i], bboxs = bbox_mrcnn, masks = mask_mrcnn, conf_id = conf_mrcnn, mode= 'PIL')
+                draw_bbox(image[i], bboxs = bbox_mrcnn, prop = proposals, masks = mask_mrcnn, conf_id = conf_mrcnn, mode= 'PIL')
             else:
                 show_image(tf.cast(image*255,tf.uint8).numpy()[i])
             tf.print('Found {} subjects'.format(len(bbox_mrcnn)))
@@ -264,7 +269,7 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
         preds, embs, proposals, logits, probs, bboxes, masks = prediction
         for i in range(nB):
             gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
-            pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], probs[i], bboxes[i], masks[i])
+            _, pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], probs[i], bboxes[i], masks[i])
             if len(gt_bbox)>0: # this is never the case but better to put
                 AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
                          pred_box, pred_class_id, pred_score, pred_mask,
@@ -274,7 +279,7 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
         mean_AP = [0.5]
     return np.mean(mean_AP)            
     
-def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
+def draw_bbox(image, bboxs=None, prop=None, masks=None, conf_id=None, mode='return'):
     colors = []
     for name, code in ImageColor.colormap.items():
          colors.append(name)
@@ -295,8 +300,8 @@ def draw_bbox(image, bboxs=None, masks=None, conf_id=None, mode='return'):
     img = np.array(img)
     if np.any(masks is not None):
         masks = np.transpose(masks,(2,0,1))
-        for i, (mask, bbox) in enumerate(zip(masks, bboxs)):
-            xyxy = np.array(bbox,dtype=np.int32)
+        for i, (mask, pro) in enumerate(zip(masks, prop)):
+            xyxy = np.array(pro,dtype=np.int32)
             if np.any(xyxy>0):
                 mask = unmold_mask(mask, xyxy, img.shape)
                 mask = np.array(Image.new('RGB', (img.shape[0], img.shape[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
@@ -413,125 +418,123 @@ def xywh2xyxy(xywh):
 def encode_labels(data):
     bboxes, mask = data
     ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=np.int32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
-    label_2 = encode_label(bboxes, mask, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0])
-    label_3 = encode_label(bboxes, mask, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1])
-    label_4 = encode_label(bboxes, mask, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2])
-    label_5 = encode_label(bboxes, mask, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.NUM_CLASS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3])
+    label_2 = encode_label(bboxes, mask, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0])
+    label_3 = encode_label(bboxes, mask, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1])
+    label_4 = encode_label(bboxes, mask, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2])
+    label_5 = encode_label(bboxes, mask, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3])
     return label_2, label_3, label_4, label_5
 
 # encode label using masks
-def encode_label(target, masks, anchor_wh, nA, nC, nGh, nGw):
-    
-   masks.set_shape([cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE])
-   masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
-                           preserve_aspect_ratio=True, antialias=True)[...,0]
-
-   masks = tf.round(masks)
-   masks = tf.clip_by_value(masks,0,1)
-   masks = tf.transpose(masks, (0,2,1))
-   masks = tf.tile(tf.cast(masks, tf.bool)[None],(nA,1,1,1))
-
-   target = tf.cast(target, tf.float32)
-   bbox = target[:,:4]/cfg.TRAIN_SIZE
-   ids = target[:,4]
-   
-   gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
-   gt_boxes = xyxy2xywh(bbox)
-   gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
-   anchor_wh = tf.cast(anchor_wh, tf.float32)
-   tbox = tf.zeros((nA, nGh, nGw, 4))
-   tconf = tf.zeros(( nA, nGh, nGw))
-   tid = tf.fill((nA, nGh, nGw, nC),-1.0)
-   
-   anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
-   anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
-   anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
-   iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
-   iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-   max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-   
-   iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
-   gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
-   
-   iou_map = tf.tile(iou_map[:,None], (1,cfg.MAX_INSTANCES,1,1))
-   
-   id_index = iou_map > cfg.ID_THRESH
-   id_index = tf.where(tf.cast(tf.tile(tf.reduce_max(tf.cast(id_index,tf.float32)*tf.cast(masks,tf.float32),axis=[2,3])[...,None,None],(1,1,nGh,nGw)),tf.bool),masks,False)
-   id_index = tf.cast(tf.reduce_max(tf.cast(id_index,tf.float32),axis=1),tf.bool)
-   fg_index = id_index
-   bg_index = tf.logical_not(fg_index)
-
-   tconf = tf.where(fg_index, 1.0, tconf)
-   tconf = tf.where(bg_index, 0.0, tconf)
-
-   gt_index = tf.boolean_mask(gt_index_map,fg_index)
-   gt_box_list = tf.gather(gt_boxes,gt_index)
-   gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
-
-   cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
-   
-   tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), tid)
-
-   fg_anchor_list = anchor_mesh[fg_index] 
-   delta_target = encode_delta(gt_box_list, fg_anchor_list)
-   tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
-       
-   label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
-   # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
-   label = tf.transpose(label,(0,2,1,3))
-   return label
+#def encode_label(target, masks, anchor_wh, nA, nC, nGh, nGw):
+#        
+#    masks.set_shape([cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE])
+#    masks = tf.image.resize(masks[...,None], (nGh,nGw), method=tf.image.ResizeMethod.BILINEAR, \
+#                            preserve_aspect_ratio=True, antialias=True)[...,0]
+#
+#    masks = tf.round(masks)
+#    masks = tf.clip_by_value(masks,0,1)
+#    masks = tf.transpose(masks, (0,2,1))
+#    masks = tf.tile(tf.cast(masks, tf.bool)[None],(nA,1,1,1))
+#
+#    target = tf.cast(target, tf.float32)
+#    bbox = target[:,:4]/cfg.TRAIN_SIZE
+#    ids = target[:,4]
+#    
+#    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
+#    gt_boxes = xyxy2xywh(bbox)
+#    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
+#    anchor_wh = tf.cast(anchor_wh, tf.float32)
+#    tbox = tf.zeros((nA, nGh, nGw, 4))
+#    tconf = tf.zeros(( nA, nGh, nGw))
+#    tid = tf.fill((nA, nGh, nGw, nC),-1.0)
+#    
+#    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
+#    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
+#    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
+#    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
+#    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+#    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+#    
+#    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
+#    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
+#    
+#    iou_map = tf.tile(iou_map[:,None], (1,cfg.MAX_INSTANCES,1,1))
+#    
+#    id_index = iou_map > cfg.ID_THRESH
+#    id_index = tf.where(tf.cast(tf.tile(tf.reduce_max(tf.cast(id_index,tf.float32)*tf.cast(masks,tf.float32),axis=[2,3])[...,None,None],(1,1,nGh,nGw)),tf.bool),masks,False)
+#    id_index = tf.cast(tf.reduce_max(tf.cast(id_index,tf.float32),axis=1),tf.bool)
+#    fg_index = id_index
+#    bg_index = tf.logical_not(fg_index)
+#
+#    tconf = tf.where(fg_index, 1.0, tconf)
+#    tconf = tf.where(bg_index, 0.0, tconf)
+#
+#    gt_index = tf.boolean_mask(gt_index_map,fg_index)
+#    gt_box_list = tf.gather(gt_boxes,gt_index)
+#    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
+#
+#    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+#    
+#    tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), tid)
+#
+#    fg_anchor_list = anchor_mesh[fg_index] 
+#    delta_target = encode_delta(gt_box_list, fg_anchor_list)
+#    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
+#        
+#    label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
+#    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
+#    label = tf.transpose(label,(0,2,1,3))
+#    return label
 
 # original labeling code, no mask is provided
-# def encode_label(target, mask, anchor_wh, nA, nC, nGh, nGw):
-#     target = tf.cast(target, tf.float32)
-#     bbox = target[:,:4]/cfg.TRAIN_SIZE
-#     ids = target[:,4]
+def encode_label(target, mask, anchor_wh, nA, nGh, nGw):
+    target = tf.cast(target, tf.float32)
+    bbox = target[:,:4]/cfg.TRAIN_SIZE
+#    ids = target[:,4]
     
-#     gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
-#     gt_boxes = xyxy2xywh(bbox)
-#     gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
-#     anchor_wh = tf.cast(anchor_wh, tf.float32)
-#     tbox = tf.zeros((nA, nGh, nGw, 4))
-#     tconf = tf.zeros(( nA, nGh, nGw))
-#     tid = tf.zeros((nA, nGh, nGw, nC))-1
+    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
+    gt_boxes = xyxy2xywh(bbox)
+    gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
+    anchor_wh = tf.cast(anchor_wh, tf.float32)
+    tbox = tf.zeros((nA, nGh, nGw, 4))
+    tconf = tf.zeros(( nA, nGh, nGw))
+#    tid = tf.zeros((nA, nGh, nGw, nC))-1
     
-#     anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
-#     anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
-#     anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
-#     iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
-#     iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-#     max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+    anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
+    anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
+    anchor_list = tf.reshape(anchor_mesh,(-1, 4))# Shpae (nA x nGh x nGw) x 4 
+    iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
+    iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
+    max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
     
-#     iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
-#     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
+    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
+    gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
     
-#     id_index = iou_map > cfg.ID_THRESH
-#     fg_index = iou_map > cfg.FG_THRESH                                                    
-#     bg_index = iou_map < cfg.BG_THRESH 
-#     ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
-#                         * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
-#     tconf = tf.where(fg_index, 1.0, tconf)
-#     tconf = tf.where(bg_index, 0.0, tconf)
-#     tconf = tf.where(ign_index, -1.0, tconf)
+#    id_index = iou_map > cfg.ID_THRESH
+    fg_index = iou_map > cfg.FG_THRESH                                                    
+    bg_index = iou_map < cfg.BG_THRESH 
+    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
+                        * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
+    tconf = tf.where(fg_index, 1.0, tconf)
+    tconf = tf.where(bg_index, 0.0, tconf)
+    tconf = tf.where(ign_index, -1.0, tconf)
 
-#     gt_index = tf.boolean_mask(gt_index_map,fg_index)
-#     gt_box_list = tf.gather(gt_boxes,gt_index)
-#     gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
+    gt_index = tf.boolean_mask(gt_index_map,fg_index)
+    gt_box_list = tf.gather(gt_boxes,gt_index)
+#    gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
 
-#     cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
     
-#     tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), tid)
+#    tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, nC)), tid)
     
-#     fg_anchor_list = anchor_mesh[fg_index] 
-#     delta_target = encode_delta(gt_box_list, fg_anchor_list)
-#     tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
+    fg_anchor_list = anchor_mesh[fg_index] 
+    delta_target = encode_delta(gt_box_list, fg_anchor_list)
+    tbox = tf.cond( cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
         
-#     label = tf.concat([tbox,tconf[...,None],tid],axis=-1)
-#     # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
-#     label = tf.transpose(label,(0,2,1,3))
-#     return label
-
-
+    label = tf.concat([tbox,tconf[...,None]],axis=-1)#tid
+    # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
+    label = tf.transpose(label,(0,2,1,3))
+    return label
 
 def decode_label(label, anchors, stride):
     label = tf.transpose(label,(0,1,3,2,4)) # decode_delta_map has some issue
@@ -666,9 +669,7 @@ def check_proposals_tensor(proposal):
     indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable=True)
 
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
-    k_proposal = tf.range(cfg.PRE_NMS_LIMIT)
-    k_proposal = tf.stop_gradient(k_proposal)
-    proposal = tf.gather(proposal, k_proposal, axis=1) # automatic zero padding
+    proposal = nms_proposals_tensor(proposal, size = cfg.PRE_NMS_LIMIT) # automatic zero padding
     return proposal
 
 def check_proposals(proposal):
@@ -684,21 +685,18 @@ def check_proposals(proposal):
     indices = tf.squeeze(tf.where(mask),axis=-1)
     proposal = tf.gather(proposal,indices, axis=0)
 
-    # padding = tf.maximum(cfg.MAX_PROP-tf.shape(proposal)[0], 0)
-    # proposal = tf.pad(proposal,paddings=[[0,padding],[0,0]], mode='CONSTANT', constant_values=0.0)
-    
-    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING')
+    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable = True)
     proposal = tf.gather(proposal,indices, axis=0)
     
-    proposal = tf.gather(proposal,tf.range(cfg.PRE_NMS_LIMIT), axis=0) # automatic zero padding only on GPU
+    proposal = nms_proposals_tensor(proposal[None], size = cfg.PRE_NMS_LIMIT)[0] # automatic zero padding
 
     return proposal
     
-def nms_proposals_tensor(proposal):
+def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
     """This function compute nms proposals without iterating over the batch """
     proposal, conf, *_ = tf.image.combined_non_max_suppression(
-            proposal[...,:4][:,:,tf.newaxis,:], proposal[...,4][...,tf.newaxis], max_output_size_per_class=cfg.MAX_PROP, \
-            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+            proposal[...,:4][:,:,tf.newaxis,:], proposal[...,4][...,tf.newaxis], max_output_size_per_class=size, \
+            max_total_size=size, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
 
     proposal = tf.concat([proposal,conf[...,tf.newaxis]], axis=-1)    
     return proposal
@@ -831,3 +829,170 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
     target_masks = tf.stop_gradient(target_masks)
 
     return target_class_ids, target_bboxs, target_masks
+
+
+class FreezeBackbone(tf.keras.callbacks.Callback):
+    def __init__(self, n_epochs=2):
+        super().__init__()
+        self.n_epochs = n_epochs
+
+    def on_epoch_start(self, epoch, logs=None):
+        if epoch <= self.n_epochs:
+            freeze_backbone(self.model, trainable=False)
+        else:
+            freeze_backbone(self.model, trainable=True)
+
+class FreezeBatchNorm(tf.keras.callbacks.Callback):
+    def __init__(self):
+        super().__init__()
+
+    def on_epoch_start(self, epoch, logs=None):
+        freeze_batch_norm(self.model)
+
+
+def freeze_batch_norm(model, trainable = False):  
+    for layer in model.layers:
+        bn_layer_name = layer.name
+        if bn_layer_name[:10] == 'batch_norm':
+            bn_layer = model.get_layer(bn_layer_name)
+            bn_layer._trainable = trainable
+        else:
+            try:
+                bn_layer_name = layer.layer.name # TimeDistributed hides the name
+                if bn_layer_name[:10] == 'batch_norm':
+                    bn_layer = model.get_layer(bn_layer_name)
+                    bn_layer._trainable = trainable
+            except:
+                continue
+
+def freeze_backbone(model, trainable = False):
+    cutoff = 78 # 77 convolutions and batch normalizations
+    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
+    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
+    for i in range(0,cutoff):
+        k = i + conv_0
+        j = i + batch_0
+        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
+        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
+        conv_layer = model.get_layer(conv_layer_name)
+        bn_layer = model.get_layer(bn_layer_name)
+        conv_layer._trainable = trainable
+        bn_layer._trainable = trainable
+            
+def freeze_rpn(model, trainable = False):
+    cutoff = 561
+    for layer in model.layers[:cutoff]:
+        layer._trainable = trainable
+
+def fine_tuning(model):
+    out_layers = [16, 37, 58, 77]
+    conv_0 = int(model.layers[1].name.split('_')[-1]) if not model.layers[1].name == 'conv2d' else 0
+    batch_0 = int (model.layers[2].name.split('_')[-1]) if not model.layers[2].name == 'batch_normalization' else 0
+    for i in out_layers:
+        k = i + conv_0
+        j = i + batch_0
+        conv_layer_name = 'conv2d_%d' %k if k > 0 else 'conv2d'
+        bn_layer_name = 'batch_normalization_%d' %j if j > 0 else 'batch_normalization'
+        conv_layer = model.get_layer(conv_layer_name)       
+        bn_layer = model.get_layer(bn_layer_name)
+        conv_layer.trainable = True
+        bn_layer.trainable = True
+
+class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
+    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
+
+  Arguments:
+      patience: Number of epochs to wait after min has been hit. After this
+      number of no improvement, training stops.
+  """
+
+    def __init__(self, patience=0):
+        super(EarlyStoppingAtMinLoss, self).__init__()
+        self.patience = patience
+        # best_weights to store the weights at which the minimum loss occurs.
+        self.best_weights = None
+
+    def on_train_begin(self, logs=None):
+        # The number of epoch it has waited when loss is no longer minimum.
+        self.wait = 0
+        # The epoch the training stops at.
+        self.stopped_epoch = 0
+        # Initialize the best as infinity.
+        self.best = np.Inf
+
+    def on_epoch_end(self, epoch, logs=None):
+        current = logs.get("alb_total_loss")
+        if np.less(current, self.best):
+            self.best = current
+            self.wait = 0
+            # Record the best weights if current results is better (less).
+            self.best_weights = self.model.get_weights()
+        else:
+            self.wait += 1
+            if self.wait >= self.patience:
+                self.stopped_epoch = epoch
+                self.model.stop_training = True
+                print("Restoring model weights from the end of the best epoch.")
+                self.model.set_weights(self.best_weights)
+
+    def on_train_end(self, logs=None):
+        if self.stopped_epoch > 0:
+            print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
+
+
+class EarlyStoppingRPN(tf.keras.callbacks.Callback):
+    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
+
+  Arguments:
+      patience: Number of epochs to wait after min has been hit. After this
+      number of no improvement, training stops.
+  """
+
+    def __init__(self, patience1=0,patience2=0):
+        super(EarlyStoppingRPN, self).__init__()
+        self.patience1 = patience1
+        self.patience2 = patience2
+        # best_weights to store the weights at which the minimum loss occurs.
+        self.best_weights = None
+
+    def on_train_begin(self, logs=None):
+        # The number of epoch it has waited when loss is no longer minimum.
+        self.wait = 0
+        self.freeze_rpn = False
+        # The epoch the training stops at.
+        self.stopped_epoch = 0
+        # Initialize the best as infinity.
+        self.best = np.Inf
+
+    def on_epoch_end(self, epoch, logs=None):
+        current = logs.get("alb_total_loss")
+        if np.less(current, self.best):
+            self.best = current
+            self.wait = 0
+            # Record the best weights if current results is better (less).
+            self.best_weights = self.model.get_weights()
+        else:
+            self.wait += 1
+            if not self.freeze_rpn:
+                if self.wait >= self.patience1:
+                    self.wait = 0
+                    self.stopped_epoch = epoch
+                    self.freeze_rpn = True
+                    self.model.set_weights(self.best_weights) 
+                    print("Restoring model weights from the end of the best epoch.")
+            else:
+                if self.wait >= self.patience2:
+                    self.stopped_epoch = epoch
+                    self.model.stop_training = True
+                    print("Restoring model weights from the end of the best epoch.")
+                    self.model.set_weights(self.best_weights)
+
+
+    def on_epoch_start(self, epoch, logs=None):
+        if self.freeze_rpn:
+            freeze_rpn(self.model,trainable=False)
+            print('Freezed RPN')
+
+    def on_train_end(self, logs=None):
+        if self.stopped_epoch > 0:
+            print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
