@@ -14,8 +14,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from loader import DataLoader 
 from model import get_model
-from layers import  FreezeBackbone, EarlyStoppingRPN, fine_tuning
-from utils import folders
+from utils import  FreezeBackbone, EarlyStoppingRPN, fine_tuning, folders
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

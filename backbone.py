@@ -72,6 +72,7 @@ def cspdarknet53_graph(input_data):
     input_data = convolutional(input_data, (3, 3, 512, 1024))
     input_data = convolutional(input_data, (1, 1, 1024, 512))
 
+    # SPP module
     input_data = tf.concat([tf.nn.max_pool(input_data, ksize=13, padding='SAME', strides=1),\
                             tf.nn.max_pool(input_data, ksize=9, padding='SAME', strides=1), \
                             tf.nn.max_pool(input_data, ksize=5, padding='SAME', strides=1), input_data], axis=-1)

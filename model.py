@@ -1,10 +1,10 @@
 import config as cfg
 import tensorflow as tf
-from utils import encode_labels, preprocess_mrcnn, entry_stop_gradients
+from utils import encode_labels, preprocess_mrcnn, entry_stop_gradients, freeze_backbone
 from backbone import cspdarknet53_graph, load_weights_cspdarknet53
 from layers import yolov4_plus1_graph, yolov4_plus1_decode_graph, yolov4_plus1_proposal_graph,\
-     fpn_classifier_graph_AFP, build_fpn_mask_graph_AFP, freeze_backbone, PyramidROIAlign_AFP,\
-     panet_fpn_graph, yolov4_plus1_panet_fpn_decode_graph
+     box_classifier_graph_AFP, mask_graph_AFP, PyramidROIAlign_AFP#,\
+     #panet_fpn_graph, yolov4_plus1_panet_fpn_decode_graph
 
 class Model(tf.keras.Model):
     
@@ -42,8 +42,8 @@ def get_model(pretrained_backbone=True):
     rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions)
     pooled_rois_classifier = PyramidROIAlign_AFP((cfg.POOL_SIZE, cfg.POOL_SIZE),name="roi_align_classifier")([rpn_proposals[...,:4],rpn_embeddings])
     pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_embeddings])
-    mrcnn_class_logits, mrcnn_class, mrcnn_bbox = fpn_classifier_graph_AFP(pooled_rois_classifier)
-    mrcnn_mask = build_fpn_mask_graph_AFP(pooled_rois_mask)
+    mrcnn_class_logits, mrcnn_class, mrcnn_bbox = box_classifier_graph_AFP(pooled_rois_classifier)
+    mrcnn_mask = mask_graph_AFP(pooled_rois_mask)
     #backbone, neck,pooled_rois_classifier, pooled_rois_mask,
     model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_embeddings, \
                                                 rpn_proposals, mrcnn_class_logits, \
@@ -55,7 +55,7 @@ def get_model(pretrained_backbone=True):
     model.s_mm = tf.Variable(initial_value=0.0, trainable=True, name = 's_mm')
     if pretrained_backbone:
         load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
-#        freeze_backbone(model)
+        freeze_backbone(model)
     return model
 
 def train_step(model, data, optimizer):
