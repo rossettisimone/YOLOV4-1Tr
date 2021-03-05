@@ -583,7 +583,9 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     
     def call(self, inputs):
         # Crop boxes [batch, num_boxes, (y1, x1, y2, x2)] in normalized coords
-        boxes = inputs[0]
+        boxes = inputs[0] # is x1, y1, x2, y2
+        x1, y1, x2, y2 = tf.unstack(boxes[...,:4], axis=-1)
+        boxes = tf.concat([y1[...,tf.newaxis],x1[...,tf.newaxis],y2[...,tf.newaxis],x2[...,tf.newaxis]],axis=-1)
         # Feature Maps. List of feature maps from different level of the
         # feature pyramid. Each is [batch, height, width, channels]
         feature_maps = inputs[1]
