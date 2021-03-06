@@ -138,14 +138,14 @@ image, gt_masks, gt_bboxes = data
 
 draw_bbox(image = image[0].numpy(), mode= 'PIL')
 
-output = model(image)
+output = model.infer(image)
 
 path = os.path.join('experiments')
 os.makedirs(path,exist_ok=True)
-path = os.path.join(path,'bug_fix')
+path = os.path.join(path,'featires1')
 os.makedirs(path,exist_ok=True)
 Image.fromarray(np.array(image[0].numpy()*255,np.uint8)).save(os.path.join(path,'image.png'))
-for i in range(0,4):
+for i in range(0,7):
     if i==0:
         subpath = os.path.join(path,'backbone')
         os.makedirs(subpath,exist_ok=True)
@@ -158,7 +158,7 @@ for i in range(0,4):
                 name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
                 img = Image.fromarray(img)
                 w,h = img.size
-                img.resize((w*5,h*5)).convert("L").save(name)
+                img.convert("L").save(name)
             print(os.path.join(subpath,'b_{}'.format(str(j+2))))
     elif i==1:
         subpath = os.path.join(path,'neck')
@@ -172,7 +172,7 @@ for i in range(0,4):
                 name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
                 img = Image.fromarray(img)
                 w,h = img.size
-                img.resize((w*5,h*5)).convert("L").save(name)
+                img.convert("L").save(name)
             print(os.path.join(subpath,'n_{}'.format(str(j+2))))
     elif i==2:
         subpath = os.path.join(path,'head_predictions')
@@ -189,7 +189,7 @@ for i in range(0,4):
                     name = os.path.join(subsubsubpath,'channel_{}.png'.format(str(c)))
                     img = Image.fromarray(img)
                     w,h = img.size
-                    img.resize((w*5,h*5)).convert("L").save(name)
+                    img.convert("L").save(name)
             print(os.path.join(subpath,'p_{}'.format(str(j+2))))
     elif i==3:
         subpath = os.path.join(path,'head_embeddings')
@@ -203,9 +203,38 @@ for i in range(0,4):
                 name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
                 img = Image.fromarray(img)
                 w,h = img.size
-                img.resize((w*5,h*5)).convert("L").save(name)
+                img.convert("L").save(name)
             print(os.path.join(subpath,'e_{}'.format(str(j+2))))
-        
+    elif i==5:
+        subpath = os.path.join(path,'rois_box_classification')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            o=o[0]
+            for s in range(o.shape[0]):
+                subsubpath = os.path.join(subpath,'roi_{}'.format(str(s)))
+                os.makedirs(subsubpath,exist_ok=True)
+                for c in range(o.shape[-1]):
+                    img = o[s,:,:,c].numpy()*255
+                    name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                    img = Image.fromarray(img)
+                    w,h = img.size
+                    img.convert("L").save(name)
+            print(os.path.join(subpath,'roi_class_{}'.format(str(j))))
+    elif i==6:
+        subpath = os.path.join(path,'rois_mask')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            o=o[0]
+            for s in range(o.shape[0]):
+                subsubpath = os.path.join(subpath,'roi_{}'.format(str(s)))
+                os.makedirs(subsubpath,exist_ok=True)
+                for c in range(o.shape[-1]):
+                    img = o[s,:,:,c].numpy()*255
+                    name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                    img = Image.fromarray(img)
+                    w,h = img.size
+                    img.convert("L").save(name)
+            print(os.path.join(subpath,'roi_mask_{}'.format(str(j))))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET DECODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -229,13 +258,13 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1)
 _ = model.infer(iterator.__iter__().next()[0])
 
-for data in iterator.take(10):
+for data in iterator.take(1):
     image, gt_masks, gt_bboxes = data
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 #    start = time.perf_counter()
     predictions = model.infer(image)
     preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
-    pred_mask *= 10
+#    pred_mask *= 10
     predictions = preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask
 #    end = time.perf_counter()-start
     i+=1

@@ -300,7 +300,7 @@ def box_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=cfg.NU
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
     shared = tf.keras.layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name="pool_squeeze")(x)
     # Classifier head
-    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes),
+    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes+1), # class + 1, 0 is background
                                             name='mrcnn_class_logits')(shared)
 
     mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),

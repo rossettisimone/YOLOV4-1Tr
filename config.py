@@ -33,8 +33,7 @@ BG_THRESH = 0.4
 
 IOU_THRESH = 0.5
 # Network
-NUM_CLASSES = 2
-MAX_BBOX_PER_SCALE = 20
+NUM_CLASSES = 1
 
 ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
           27,  82,  57, 165, 102, 209, 181, 235,
@@ -56,7 +55,7 @@ BBOX_REG = 2
 STRIDES = [ 4, 8, 16, 32]
 
 LEVELS = 4
-EMB_DIM = 256 #TRAIN_SIZE//2
+EMB_DIM = TRAIN_SIZE//2
 CSP_DARKNET53 = './weights/yolov4.weights'
 
 # Train
