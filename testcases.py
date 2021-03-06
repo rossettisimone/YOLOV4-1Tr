@@ -106,8 +106,8 @@ def test_encode_decode_loss():
     from model import mrcnn_class_loss_graph,mrcnn_bbox_loss_graph,mrcnn_mask_loss_graph
     pred_class_logits = tf.cast(target_class_ids,tf.float32)*2-1
     pred_class_logits = tf.concat([-pred_class_logits[...,None],pred_class_logits[...,None]], axis=-1)*10
-    pred_bbox = tf.tile(target_bbox[:,:,None,:],(1,1,2,1))
-    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,2))
+    pred_bbox = tf.tile(target_bbox[:,:,None,:],(1,1,1,1))
+    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,1))
     loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
     loss += mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
     loss += mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
