@@ -31,7 +31,7 @@ def folders():
         out_file.write(in_file.read())
     filepath = os.path.join(folder, cfg.WEIGHTS)
     os.mkdir(filepath)
-    filepath = os.path.join(filepath,'model.{epoch:02d}-{val_alb_total_loss:.3f}.h5')
+    filepath = os.path.join(filepath,'model.{epoch:02d}-{val_total_loss:.3f}.h5')
     return logdir, filepath
                   
 def filter_inputs(image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes):
