@@ -36,7 +36,7 @@ optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
                                 learning_rate = cfg.LR, momentum = cfg.MOM, \
                                 nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
 
-GPUs = ["GPU:"+i for i in cfg.GPU.split(',')]
+GPUs = ["GPU:"+str(i) for i in range(len(cfg.GPU.split(',')))]
 strategy = tf.distribute.MirroredStrategy(GPUs)
 GLOBAL_BATCH = cfg.BATCH * strategy.num_replicas_in_sync
 
