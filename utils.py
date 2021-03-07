@@ -187,30 +187,29 @@ def decode_proposal(proposal, mode='cut'):
     else:
         return bbox, conf
 
-def decode_mask(proposal, prob, bbox_mrcnn, mask_mrcnn, mode='keep'):
+def decode_mask(proposal, bbox_mrcnn, mask_mrcnn, mode='keep'):
     conf = proposal[...,4].numpy()
     proposal = proposal[...,:4]
     bbox = xyxy2xywh(proposal)
-    bbox_mrcnn = bbox_mrcnn[...,1,:4]
+    bbox_mrcnn = bbox_mrcnn[...,0,:4]
     bbox_mrcnn = decode_delta(bbox_mrcnn, bbox)
     bbox_mrcnn = xywh2xyxy(bbox_mrcnn)
     bbox_mrcnn = tf.clip_by_value(bbox_mrcnn,0.0,1.0)
     bbox_mrcnn = tf.round(bbox_mrcnn*cfg.TRAIN_SIZE).numpy()
-    conf_mrcnn = prob[...,1].numpy()
-    total_conf = conf * conf_mrcnn
-    mask_mrcnn = mask_mrcnn[...,1]
+    mask_mrcnn = mask_mrcnn[...,0]
     mask_mrcnn = tf.transpose(mask_mrcnn,(1,2,0)).numpy()
     proposal = tf.round(proposal*cfg.TRAIN_SIZE).numpy()
     if mode == 'cut':
-        mask = total_conf>cfg.CONF_THRESH
-        pred_class_id = tf.cast(total_conf[mask]>0, tf.int32).numpy()
-        return proposal[mask], bbox_mrcnn[mask], pred_class_id, total_conf[mask], mask_mrcnn[...,mask]
+        mask = conf>cfg.CONF_THRESH
+        pred_class_id = tf.cast(conf[mask]>0, tf.int32).numpy()
+        return proposal[mask], bbox_mrcnn[mask], pred_class_id, conf[mask], mask_mrcnn[...,mask]
     else:
-        pred_class_id = tf.cast(total_conf>cfg.CONF_THRESH, tf.int32).numpy()
-        return proposal, bbox_mrcnn, pred_class_id, total_conf, mask_mrcnn
+        pred_class_id = tf.cast(conf>cfg.CONF_THRESH, tf.int32).numpy()
+        return proposal, bbox_mrcnn, pred_class_id, conf, mask_mrcnn
     
 
 def decode_target_mask(proposal, target_class_ids, target_bbox, target_masks, mode='keep'):
+    conf = proposal[...,4].numpy()
     bbox = proposal[...,:4]
     bbox = xyxy2xywh(bbox)
     bbox_mrcnn = target_bbox
@@ -218,14 +217,13 @@ def decode_target_mask(proposal, target_class_ids, target_bbox, target_masks, mo
     bbox_mrcnn = xywh2xyxy(bbox_mrcnn)
     bbox_mrcnn = tf.clip_by_value(bbox_mrcnn,0.0,1.0)
     bbox_mrcnn = tf.round(bbox_mrcnn*cfg.TRAIN_SIZE).numpy()
-    conf_mrcnn = target_class_ids.numpy()
     mask_mrcnn = target_masks
     mask_mrcnn = tf.transpose(mask_mrcnn,(1,2,0)).numpy()
     if mode == 'cut':
-        mask = conf_mrcnn>cfg.CONF_THRESH
-        return bbox_mrcnn[mask], conf_mrcnn[mask], mask_mrcnn[...,mask]
+        mask = conf>cfg.CONF_THRESH
+        return bbox_mrcnn[mask], conf[mask], mask_mrcnn[...,mask]
     else:
-        return bbox_mrcnn, conf_mrcnn, mask_mrcnn
+        return bbox_mrcnn, conf, mask_mrcnn
     
 def decode_ground_truth(gt_bboxes, gt_masks):
     gt_bbox = gt_bboxes[...,:4]
@@ -241,16 +239,16 @@ def show_infer(data, prediction):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     nB = tf.shape(image)[0]
     if len(prediction)>3:
-        preds, embs, proposals, logits, probs, bboxes, masks = prediction
+        preds, proposals, bboxes, masks = prediction
         for i in range(nB):
-            proposals, bbox_mrcnn, id_mrcnn, conf_mrcnn, mask_mrcnn = decode_mask(proposals[i], probs[i], bboxes[i], masks[i], 'cut')
+            proposals, bbox_mrcnn, id_mrcnn, conf, mask_mrcnn = decode_mask(proposals[i], bboxes[i], masks[i], 'cut')
             if len(bbox_mrcnn)>0:
-                draw_bbox(image[i], bboxs = bbox_mrcnn, prop = proposals, masks = mask_mrcnn, conf_id = conf_mrcnn, mode= 'PIL')
+                draw_bbox(image[i], bboxs = bbox_mrcnn, prop = proposals, masks = mask_mrcnn, conf_id = conf, mode= 'PIL')
             else:
                 show_image(tf.cast(image*255,tf.uint8).numpy()[i])
             tf.print('Found {} subjects'.format(len(bbox_mrcnn)))
     else:
-        preds, embs, proposals = prediction
+        preds, proposals = prediction
         for i in range(nB):
             bbox, conf = decode_proposal(proposals[i], 'cut')
             if len(bbox)>0:
@@ -264,10 +262,10 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
     nB = tf.shape(image)[0]
     mean_AP = []
     if len(prediction)>3: # if masks are present TODO
-        preds, embs, proposals, logits, probs, bboxes, masks = prediction
+        preds, proposals, bboxes, masks = prediction
         for i in range(nB):
             gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
-            _, pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], probs[i], bboxes[i], masks[i])
+            _, pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], bboxes[i], masks[i])
             if len(gt_bbox)>0: # this is never the case but better to put
                 AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
                          pred_box, pred_class_id, pred_score, pred_mask,

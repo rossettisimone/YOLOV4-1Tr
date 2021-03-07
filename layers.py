@@ -299,13 +299,6 @@ def box_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=cfg.NU
                            name="mrcnn_class_shared")(x)
     x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
     shared = tf.keras.layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name="pool_squeeze")(x)
-    # Classifier head
-    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes+1), # class + 1, 0 is background
-                                            name='mrcnn_class_logits')(shared)
-
-    mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),
-                                     name="mrcnn_class")(mrcnn_class_logits)
-
     # BBox head
     # [batch, num_rois, NUM_CLASSES * (dx, dy, log(dw), log(dh))]
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes * 4, activation='linear'),
@@ -313,7 +306,7 @@ def box_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=cfg.NU
 
     mrcnn_bbox = tf.keras.layers.Reshape((x.shape.as_list()[1], num_classes, 4), name="mrcnn_bbox")(x)
 
-    return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
+    return mrcnn_bbox
 
 ############################################################
 #  PANet modified MASK-RCNN mask graph

@@ -20,19 +20,19 @@ class Model(tf.keras.Model):
         image, gt_masks, gt_bboxes = data
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-        alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = train_step(self, data, self.optimizer)
+        alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = train_step(self, data, self.optimizer)
         return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
-                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
-                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mc":self.s_mc, "s_mm":self.s_mm }
+                "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
+                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mm":self.s_mm }
     
     def test_step(self, data):
         image, gt_masks, gt_bboxes = data
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-        alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = val_step(self, data)
+        alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = val_step(self, data)
         return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
-                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
-                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mc":self.s_mc, "s_mm":self.s_mm }
+                "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
+                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mm":self.s_mm }
     
 def get_model(pretrained_backbone=True):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
@@ -42,15 +42,12 @@ def get_model(pretrained_backbone=True):
     rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions)
     pooled_rois_classifier = PyramidROIAlign_AFP((cfg.POOL_SIZE, cfg.POOL_SIZE),name="roi_align_classifier")([rpn_proposals[...,:4],rpn_embeddings])
     pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_embeddings])
-    mrcnn_class_logits, mrcnn_class, mrcnn_bbox = box_classifier_graph_AFP(pooled_rois_classifier)
+    mrcnn_bbox = box_classifier_graph_AFP(pooled_rois_classifier)
     mrcnn_mask = mask_graph_AFP(pooled_rois_mask)
     #backbone, neck,pooled_rois_classifier, pooled_rois_mask,
-    model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_embeddings, \
-                                                rpn_proposals, mrcnn_class_logits, \
-                                                mrcnn_class, mrcnn_bbox, mrcnn_mask])
+    model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_bbox, mrcnn_mask])
     model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
     model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
-    model.s_mc = tf.Variable(initial_value=0.0, trainable=True, name = 's_mc')
     model.s_mr = tf.Variable(initial_value=0.0, trainable=True, name = 's_mr')
     model.s_mm = tf.Variable(initial_value=0.0, trainable=True, name = 's_mm')
     if pretrained_backbone:
@@ -63,10 +60,10 @@ def train_step(model, data, optimizer):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
     with tf.GradientTape() as tape:
-        preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = model(image, training=training)
+        preds, proposals, pred_bbox, pred_mask = model(image, training=training)
         proposals = proposals[...,:4]
         target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-        alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+        alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_bbox, target_masks, pred_bbox, pred_mask, training)
     gradients = tape.gradient(alb_total_loss, model.trainable_variables)
     optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables) if grad is not None)
     return [alb_total_loss] + loss_list
@@ -75,27 +72,27 @@ def val_step(model, data):
     training = False
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
-    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = model(image, training=training)
+    preds, proposals, pred_bbox, pred_mask = model(image, training=training)
     proposals = proposals[...,:4]
     target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-    alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+    alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_bbox, target_masks, pred_bbox, pred_mask, training)
     return [alb_total_loss] + loss_list
 
-def compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
+def compute_loss(model, labels, preds, proposals, target_class_ids, target_bbox, target_masks, pred_bbox, pred_masks, training):
     # rpn loss 
-    alb_total_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds, embs)
+    alb_total_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds)
     # mrcnn loss
-    alb_loss, *mrcnn_loss_list = compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks)
+    alb_loss, *mrcnn_loss_list = compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_bbox, pred_masks)
     alb_total_loss += alb_loss
     alb_total_loss *= 0.5
 
     return [alb_total_loss] + rpn_loss_list + mrcnn_loss_list
 
-def compute_loss_rpn(model, labels, preds, embs):
+def compute_loss_rpn(model, labels, preds):
     rpn_box_loss = []
     rpn_class_loss = []
-    for label, pred, emb in zip(labels, preds, embs):
-        lbox, lconf = compute_loss_rpn_level(label, pred, emb)
+    for label, pred in zip(labels, preds):
+        lbox, lconf = compute_loss_rpn_level(label, pred)
         rpn_box_loss.append(lbox)
         rpn_class_loss.append(lconf)
     rpn_box_loss, rpn_class_loss = tf.reduce_mean(rpn_box_loss,axis=0), tf.reduce_mean(rpn_class_loss,axis=0)
@@ -103,7 +100,7 @@ def compute_loss_rpn(model, labels, preds, embs):
                 + (model.s_r + model.s_c) #Automatic Loss Balancing        
     return alb_loss, rpn_box_loss, rpn_class_loss
 
-def compute_loss_rpn_level(label, pred, emb):
+def compute_loss_rpn_level(label, pred):
     pbox = pred[..., :4]
     pconf = pred[..., 4:6]
     tbox = label[...,:4]
@@ -118,53 +115,15 @@ def compute_loss_rpn_level(label, pred, emb):
     lconf =  tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf)) # apply softmax and do non negative log likelihood loss 
     return lbox, lconf
 
-def compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks):
+def compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_bbox, pred_masks):
     # prepare the ground truth
-    mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
     mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
     mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
     alb_loss = tf.cond(tf.greater(tf.reduce_sum(proposals),0.0), lambda: \
-                tf.math.exp(-model.s_mc)*mrcnn_class_loss + tf.math.exp(-model.s_mr)*mrcnn_box_loss \
-                + tf.math.exp(-model.s_mm)*mrcnn_mask_loss + (model.s_mr + model.s_mc + model.s_mm), \
-                lambda: mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss)
-    return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss  #Automatic Loss Balancing   
-
-
-def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
-    """Loss for the classifier head of Mask RCNN.
-    target_class_ids: [batch, num_rois]. Integer class IDs. Uses zero
-        padding to fill in the array.
-    pred_class_logits: [batch, num_rois, num_classes]
-    active_class_ids: [batch, num_classes]. Has a value of 1 for
-        classes that are in the dataset of the image, and 0
-        for classes that are not in the dataset.
-        active_class_ids = tf.concat([tf.zeros((nB,1)),tf.ones((nB,1))],axis=-1)
-    """
-
-    # During model building, Keras calls this function with
-    # target_class_ids of type float32. Unclear why. Cast it
-    # to int to get around it.
-#    target_class_ids = tf.cast(target_class_ids, 'int32')
-
-    # Find predictions of classes that are not in the dataset.
-#    pred_class_ids = tf.argmax(pred_class_logits, axis=2)
-    # TODO: Update this line to work with batch > 1. Right now it assumes all
-    #       images in a batch have the same active_class_ids
-    
-#    pred_active = tf.gather(active_class_ids[0], pred_class_ids)
-
-    # # Loss
-    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=target_class_ids, logits=pred_class_logits)
-
-    # Erase losses of predictions of classes that are not in the active
-    # classes of the image.
-#    loss = loss * pred_active
-
-    # Computer loss mean. Use only predictions that contribute
-    # to the loss to get a correct mean.
-    loss = tf.reduce_mean(loss) #/ tf.reduce_sum(pred_active)
-    return loss
+                tf.math.exp(-model.s_mr)*mrcnn_box_loss \
+                + tf.math.exp(-model.s_mm)*mrcnn_mask_loss + (model.s_mr + model.s_mm), \
+                lambda: mrcnn_box_loss + mrcnn_mask_loss)
+    return alb_loss, mrcnn_box_loss, mrcnn_mask_loss  #Automatic Loss Balancing   
 
 
 def smooth_l1_loss(y_true, y_pred):
