@@ -44,10 +44,10 @@ training = True
 image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
 labels = [label_2, labe_3, label_4, label_5]
 with tf.GradientTape() as tape:
-    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = model(image, training=training)
+    preds, proposals, pred_mask = model(image, training=training)
     proposals = proposals[...,:4]
-    target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-    alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+    target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+    alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
 gradients = tape.gradient(alb_total_loss, model.trainable_variables)
 print(loss_list[-1])
 optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables))
@@ -115,7 +115,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.33--11.166.h5')
+#model.load_weights('/home/fiorapirri/tracker/weights/model.33--11.166.h5')
 
 model.trainable = False
 
@@ -258,14 +258,14 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1)
 _ = model.infer(iterator.__iter__().next()[0])
 
-for data in iterator.take(1):
+for data in iterator.take(10):
     image, gt_masks, gt_bboxes = data
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 #    start = time.perf_counter()
     predictions = model.infer(image)
-    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
-#    pred_mask *= 10
-    predictions = preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask
+    preds, proposals, pred_mask = predictions
+    pred_mask *= 10
+    predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
     i+=1
 #    sec += end
