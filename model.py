@@ -3,7 +3,7 @@ import tensorflow as tf
 from utils import encode_labels, preprocess_mrcnn, entry_stop_gradients, freeze_backbone
 from backbone import cspdarknet53_graph, load_weights_cspdarknet53
 from layers import yolov4_plus1_graph, yolov4_plus1_decode_graph, yolov4_plus1_proposal_graph,\
-     mask_graph_AFP, PyramidROIAlign_AFP#,\
+     box_classifier_graph_AFP, mask_graph_AFP, PyramidROIAlign_AFP#,\
      #panet_fpn_graph, yolov4_plus1_panet_fpn_decode_graph
 
 class Model(tf.keras.Model):
@@ -20,17 +20,19 @@ class Model(tf.keras.Model):
         image, gt_masks, gt_bboxes = data
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-        alb_loss, box_loss, class_loss, mask_loss = train_step(self, data, self.optimizer)
-        return {"alb_loss": alb_loss, "box_loss": box_loss, "class_loss": class_loss, \
-                "mask_loss": mask_loss, "s_r":self.s_r,"s_c":self.s_c, "s_m":self.s_m }
+        alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = train_step(self, data, self.optimizer)
+        return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
+                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
+                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mc":self.s_mc, "s_mm":self.s_mm }
     
     def test_step(self, data):
         image, gt_masks, gt_bboxes = data
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-        alb_loss, box_loss, class_loss, mask_loss = val_step(self, data)
-        return {"alb_loss": alb_loss, "box_loss": box_loss, "class_loss": class_loss, \
-                "mask_loss": mask_loss, "s_r":self.s_r,"s_c":self.s_c, "s_m":self.s_m }
+        alb_total_loss, rpn_box_loss, rpn_class_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss = val_step(self, data)
+        return {"alb_total_loss": alb_total_loss, "rpn_box_loss": rpn_box_loss, "rpn_class_loss": rpn_class_loss, \
+                "mrcnn_class_loss":mrcnn_class_loss, "mrcnn_box_loss":mrcnn_box_loss, "mrcnn_mask_loss": mrcnn_mask_loss,
+                "s_r":self.s_r,"s_c":self.s_c, "s_mr":self.s_mr, "s_mc":self.s_mc, "s_mm":self.s_mm }
     
 def get_model(pretrained_backbone=True):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
@@ -38,13 +40,19 @@ def get_model(pretrained_backbone=True):
     neck = yolov4_plus1_graph(backbone)
     rpn_predictions, rpn_embeddings = yolov4_plus1_decode_graph(neck)
     rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions)
+    pooled_rois_classifier = PyramidROIAlign_AFP((cfg.POOL_SIZE, cfg.POOL_SIZE),name="roi_align_classifier")([rpn_proposals[...,:4],rpn_embeddings])
     pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_embeddings])
+    mrcnn_class_logits, mrcnn_class, mrcnn_bbox = box_classifier_graph_AFP(pooled_rois_classifier)
     mrcnn_mask = mask_graph_AFP(pooled_rois_mask)
     #backbone, neck,pooled_rois_classifier, pooled_rois_mask,
-    model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_mask])
+    model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_embeddings, \
+                                                rpn_proposals, mrcnn_class_logits, \
+                                                mrcnn_class, mrcnn_bbox, mrcnn_mask])
     model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
     model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
-    model.s_m = tf.Variable(initial_value=0.0, trainable=True, name = 's_m')
+    model.s_mc = tf.Variable(initial_value=0.0, trainable=True, name = 's_mc')
+    model.s_mr = tf.Variable(initial_value=0.0, trainable=True, name = 's_mr')
+    model.s_mm = tf.Variable(initial_value=0.0, trainable=True, name = 's_mm')
     if pretrained_backbone:
         load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
         freeze_backbone(model)
@@ -55,47 +63,47 @@ def train_step(model, data, optimizer):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
     with tf.GradientTape() as tape:
-        preds, proposals, pred_mask = model(image, training=training)
+        preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = model(image, training=training)
         proposals = proposals[...,:4]
-        target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-        alb_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
-    gradients = tape.gradient(alb_loss, model.trainable_variables)
+        target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+        alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+    gradients = tape.gradient(alb_total_loss, model.trainable_variables)
     optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables) if grad is not None)
-    return [alb_loss] + loss_list
+    return [alb_total_loss] + loss_list
 
 def val_step(model, data):
     training = False
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
-    preds, proposals, pred_mask = model(image, training=training)
+    preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = model(image, training=training)
     proposals = proposals[...,:4]
-    target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-    alb_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
-    return [alb_loss] + loss_list
+    target_class_ids, target_bbox, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+    alb_total_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_mask, training)
+    return [alb_total_loss] + loss_list
 
-def compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_masks, training):
+def compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks, training):
     # rpn loss 
-    alb_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds)
+    alb_total_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds, embs)
     # mrcnn loss
-    alb_total_loss, *mrcnn_loss_list = compute_loss_mrcnn(model, proposals, target_class_ids, target_masks, pred_masks)
+    alb_loss, *mrcnn_loss_list = compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks)
     alb_total_loss += alb_loss
     alb_total_loss *= 0.5
 
     return [alb_total_loss] + rpn_loss_list + mrcnn_loss_list
 
-def compute_loss_rpn(model, labels, preds):
-    box_loss = []
-    class_loss = []
-    for label, pred in zip(labels, preds):
-        lbox, lconf = compute_loss_rpn_level(label, pred)
-        box_loss.append(lbox)
-        class_loss.append(lconf)
-    box_loss, class_loss = tf.reduce_mean(box_loss,axis=0), tf.reduce_mean(class_loss,axis=0)
-    alb_loss = tf.math.exp(-model.s_r)*box_loss + tf.math.exp(-model.s_c)*class_loss \
+def compute_loss_rpn(model, labels, preds, embs):
+    rpn_box_loss = []
+    rpn_class_loss = []
+    for label, pred, emb in zip(labels, preds, embs):
+        lbox, lconf = compute_loss_rpn_level(label, pred, emb)
+        rpn_box_loss.append(lbox)
+        rpn_class_loss.append(lconf)
+    rpn_box_loss, rpn_class_loss = tf.reduce_mean(rpn_box_loss,axis=0), tf.reduce_mean(rpn_class_loss,axis=0)
+    alb_loss = tf.math.exp(-model.s_r)*rpn_box_loss + tf.math.exp(-model.s_c)*rpn_class_loss \
                 + (model.s_r + model.s_c) #Automatic Loss Balancing        
-    return alb_loss, box_loss, class_loss
+    return alb_loss, rpn_box_loss, rpn_class_loss
 
-def compute_loss_rpn_level(label, pred):
+def compute_loss_rpn_level(label, pred, emb):
     pbox = pred[..., :4]
     pconf = pred[..., 4:6]
     tbox = label[...,:4]
@@ -110,12 +118,54 @@ def compute_loss_rpn_level(label, pred):
     lconf =  tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf)) # apply softmax and do non negative log likelihood loss 
     return lbox, lconf
 
-def compute_loss_mrcnn(model, proposals, target_class_ids, target_masks, pred_masks):
+def compute_loss_mrcnn(model, proposals, target_class_ids, target_bbox, target_masks, pred_class_logits, pred_bbox, pred_masks):
     # prepare the ground truth
-    mask_loss = mask_loss_graph(target_masks, target_class_ids, pred_masks)
-    alb_loss = tf.cond(tf.greater(tf.reduce_sum(proposals),0.0), lambda: tf.math.exp(-model.s_m)*mask_loss + (model.s_m), \
-                lambda: mask_loss)
-    return alb_loss, mask_loss  #Automatic Loss Balancing   
+    mrcnn_class_loss = mrcnn_class_loss_graph(target_class_ids, pred_class_logits)
+    mrcnn_box_loss = mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox)
+    mrcnn_mask_loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
+    alb_loss = tf.cond(tf.greater(tf.reduce_sum(proposals),0.0), lambda: \
+                tf.math.exp(-model.s_mc)*mrcnn_class_loss + tf.math.exp(-model.s_mr)*mrcnn_box_loss \
+                + tf.math.exp(-model.s_mm)*mrcnn_mask_loss + (model.s_mr + model.s_mc + model.s_mm), \
+                lambda: mrcnn_class_loss + mrcnn_box_loss + mrcnn_mask_loss)
+    return alb_loss, mrcnn_class_loss, mrcnn_box_loss, mrcnn_mask_loss  #Automatic Loss Balancing   
+
+
+def mrcnn_class_loss_graph(target_class_ids, pred_class_logits):
+    """Loss for the classifier head of Mask RCNN.
+    target_class_ids: [batch, num_rois]. Integer class IDs. Uses zero
+        padding to fill in the array.
+    pred_class_logits: [batch, num_rois, num_classes]
+    active_class_ids: [batch, num_classes]. Has a value of 1 for
+        classes that are in the dataset of the image, and 0
+        for classes that are not in the dataset.
+        active_class_ids = tf.concat([tf.zeros((nB,1)),tf.ones((nB,1))],axis=-1)
+    """
+
+    # During model building, Keras calls this function with
+    # target_class_ids of type float32. Unclear why. Cast it
+    # to int to get around it.
+#    target_class_ids = tf.cast(target_class_ids, 'int32')
+
+    # Find predictions of classes that are not in the dataset.
+#    pred_class_ids = tf.argmax(pred_class_logits, axis=2)
+    # TODO: Update this line to work with batch > 1. Right now it assumes all
+    #       images in a batch have the same active_class_ids
+    
+#    pred_active = tf.gather(active_class_ids[0], pred_class_ids)
+
+    # # Loss
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        labels=target_class_ids, logits=pred_class_logits)
+
+    # Erase losses of predictions of classes that are not in the active
+    # classes of the image.
+#    loss = loss * pred_active
+
+    # Computer loss mean. Use only predictions that contribute
+    # to the loss to get a correct mean.
+    loss = tf.reduce_mean(loss) #/ tf.reduce_sum(pred_active)
+    return loss
+
 
 def smooth_l1_loss(y_true, y_pred):
     """Implements Smooth-L1 loss.
@@ -126,7 +176,37 @@ def smooth_l1_loss(y_true, y_pred):
     loss = (less_than_one * 0.5 * diff ** 2) + (1 - less_than_one) * (diff - 0.5)
     return loss
 
-def mask_loss_graph(target_masks, target_class_ids, pred_masks):
+
+def mrcnn_bbox_loss_graph(target_bbox, target_class_ids, pred_bbox):
+    """Loss for Mask R-CNN bounding box refinement.
+    target_bbox: [batch, num_rois, (dx, dy, log(dw), log(dh))]
+    target_class_ids: [batch, num_rois]. Integer class IDs.
+    pred_bbox: [batch, num_rois, num_classes, (dx, dy, log(dw), log(dh))]
+    """
+    # Reshape to merge batch and roi dimensions for simplicity.
+    target_class_ids = tf.reshape(target_class_ids, (-1,))
+    target_bbox = tf.reshape(target_bbox, (-1, 4))
+    pred_bbox = tf.reshape(pred_bbox, (-1, tf.shape(pred_bbox)[2], 4))
+
+    # Only positive ROIs contribute to the loss. And only
+    # the right class_id of each ROI. Get their indices.
+    positive_roi_ix = tf.where(target_class_ids > 0)[:, 0]
+    positive_roi_class_ids = tf.cast(
+        tf.gather(target_class_ids, positive_roi_ix), tf.int64)
+    indices = tf.stack([positive_roi_ix, positive_roi_class_ids], axis=1)
+
+    # Gather the deltas (predicted and true) that contribute to loss
+    target_bbox = tf.gather(target_bbox, positive_roi_ix)
+    pred_bbox = tf.gather_nd(pred_bbox, indices)
+    # Smooth-L1 Loss
+    loss = tf.cond(tf.greater(tf.size(target_bbox), 0),\
+                   lambda: smooth_l1_loss(y_true=target_bbox, y_pred=pred_bbox),\
+                   lambda: tf.constant(0.0))
+    loss = tf.reduce_mean(loss)
+    return loss
+
+
+def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     """Mask binary cross-entropy loss for the masks head.
     target_masks: [batch, num_rois, height, width].
         A float32 tensor of values 0 or 1. Uses zero padding to fill array.

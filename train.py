@@ -29,7 +29,7 @@ callbacks = tf.keras.callbacks.TensorBoard(
                                 embeddings_freq=1, embeddings_metadata=None)
 
 checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=filepath, save_weights_only=True,
-                                                monitor='val_alb_loss', mode='min',
+                                                monitor='val_alb_total_loss', mode='min',
                                                 save_best_only=False, verbose = 1)
 
 optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
@@ -56,7 +56,7 @@ model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], 
 
 with strategy.scope():
     model.load_weights(filepath.format(epoch = cfg.FINE_TUNING,\
-                                       val_alb_total_loss = train_history.history['val_alb_loss'][cfg.FINE_TUNING-1]))
+                                       val_alb_total_loss = train_history.history['val_alb_total_loss'][cfg.FINE_TUNING-1]))
     model.compile(optimizer)
     fine_tuning(model)
     dataset.train_ds = dataset.initilize_train_ds() # shuffle

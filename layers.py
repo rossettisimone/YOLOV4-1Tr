@@ -246,6 +246,76 @@ def yolov4_plus1_proposal_graph(predictions):
     return proposals
 
 ############################################################
+#  PANet modified MASK-RCNN box refinement graph
+############################################################
+
+def box_classifier_graph_AFP(inputs, pool_size=cfg.POOL_SIZE, num_classes=cfg.NUM_CLASSES, fc_layers_size=cfg.FC_LAYER_SIZE): # num classes + 1, 0 is background
+    """Builds the computation graph of the feature pyramid network classifier
+    and regressor heads.
+    rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
+          coordinates.
+    feature_maps: List of feature maps from different layers of the pyramid,
+                  [e_2, e_3, e_4, e_5]. Each has a different resolution.
+    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    pool_size: The width of the square feature map generated from ROI Pooling.
+    num_classes: number of classes, which determines the depth of the results
+    train_bn: Boolean. Train or freeze Batch Norm layers
+    fc_layers_size: Size of the 2 FC layers
+    Returns:
+        logits: [batch, num_rois, NUM_CLASSES] classifier logits (before softmax)
+        probs: [batch, num_rois, NUM_CLASSES] classifier probabilities
+        bbox_deltas: [batch, num_rois, NUM_CLASSES, (dx, dy, log(dw), log(dh))] Deltas to apply to
+                     proposal boxes
+    """
+    # rois, feature_maps = inputs[0], inputs[1]
+    # ROI Pooling
+    # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
+    x2, x3, x4, x5 = inputs
+    x2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp2')(x2)
+    x2 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp2_gn')(x2)
+    x2 = tf.keras.layers.Activation('relu', name='roi_class_afp2_gn_relu')(x2)
+    x3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp3')(x3)
+    x3 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp3_gn')(x3)
+    x3 = tf.keras.layers.Activation('relu', name='roi_class_afp3_gn_relu')(x3)
+    x4 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp4')(x4)
+    x4 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp4_gn')(x4)
+    x4 = tf.keras.layers.Activation('relu', name='roi_class_afp4_gn_relu')(x4)
+    x5 = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding='same'), name='roi_class_afp5')(x5)
+    x5 = tf.keras.layers.TimeDistributed(GroupNorm(), name='roi_class_afp5_gn')(x5)
+    x5 = tf.keras.layers.Activation('relu', name='roi_class_afp5_gn_relu')(x5)
+
+    x = tf.keras.layers.Maximum()([x2, x3, x4, x5])
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"), name="mrcnn_class_conv1")(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_class_conv1_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv1_gn_relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"), name="mrcnn_class_conv2")(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_class_conv2_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv2_gn_relu')(x)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(cfg.MASK_LAYERS_SIZE, (3, 3), padding="same"), name="mrcnn_class_conv3")(x)
+    x = tf.keras.layers.TimeDistributed(GroupNorm(), name='mrcnn_class_conv3_gn')(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_conv3_gn_relu')(x)
+
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
+                           name="mrcnn_class_shared")(x)
+    x = tf.keras.layers.Activation('relu', name='mrcnn_class_shared_relu')(x)
+    shared = tf.keras.layers.Lambda(lambda x: tf.squeeze(tf.squeeze(x, 3), 2), name="pool_squeeze")(x)
+    # Classifier head
+    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes+1), # class + 1, 0 is background
+                                            name='mrcnn_class_logits')(shared)
+
+    mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),
+                                     name="mrcnn_class")(mrcnn_class_logits)
+
+    # BBox head
+    # [batch, num_rois, NUM_CLASSES * (dx, dy, log(dw), log(dh))]
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes * 4, activation='linear'),
+                           name='mrcnn_bbox_fc')(shared)
+
+    mrcnn_bbox = tf.keras.layers.Reshape((x.shape.as_list()[1], num_classes, 4), name="mrcnn_bbox")(x)
+
+    return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
+
+############################################################
 #  PANet modified MASK-RCNN mask graph
 ############################################################
 
@@ -387,3 +457,77 @@ class PyramidROIAlign_AFP(tf.keras.layers.Layer):
     
     def get_output_shape(self):
         return [out.shape for out in self.call(self.get_input_shape())]
+
+
+############################################################
+#  PANet neck (not used)
+############################################################
+
+#def panet_fpn_graph(input_layers):
+#        
+#    b_2, b_3, b_4, b_5 = input_layers 
+#    
+#    # Top - Down FPN
+#    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_5))
+#    p_4 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_5),\
+#                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_4))])
+#    p_3 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_4),\
+#                        GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_3))])
+#    p_2 = tf.keras.layers.Add()([tf.keras.layers.UpSampling2D(size=(2, 2))(p_3),\
+#                            GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (1,1))(b_2))])
+#    
+#    p_2 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_2))
+#    p_3 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_3))
+#    p_4 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_4))
+#    p_5 = GroupNorm()(tf.keras.layers.Conv2D(filters = cfg.TOP_DOWN_PYRAMID_SIZE, kernel_size = (3,3), padding="same")(p_5))
+#
+#    # Bottom-up path augmentation
+#    n_2 = p_2
+#    
+#    n_3 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+#            tf.keras.layers.Add()([p_3, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#            tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_2)))]))))
+#    n_4 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+#        tf.keras.layers.Add()([p_4, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_3)))]))))
+#    n_5 = tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), padding='same')(
+#        tf.keras.layers.Add()([p_5, tf.keras.layers.Activation(activation='relu')(GroupNorm()(
+#        tf.keras.layers.Conv2D(cfg.TOP_DOWN_PYRAMID_SIZE, (3, 3), strides=(2, 2), padding='same')(n_4)))]))))
+#    
+#    return n_2, n_3, n_4, n_5
+#
+#def yolov4_plus1_panet_fpn_decode_graph(input_layer):
+#    
+#    n_2, n_3, n_4, n_5 = input_layer
+#    
+#    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS
+#    prediction_filters = cfg.NUM_ANCHORS * prediction_channels
+#    
+#    x = Conv2D(n_2, kernel_size = 3, filters = 64)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    x = Conv2D(n_3, kernel_size = 3, filters = 128)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    x = Conv2D(n_4, kernel_size = 3, filters = 256)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    x = Conv2D(n_5, kernel_size = 3, filters = 512)
+#    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
+#    p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
+#                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
+#                                      prediction_channels]), perm = [0, 3, 1, 2, 4])
+#    
+#    return [p_2,p_3,p_4,p_5], [n_2, n_3, n_4, n_5]
