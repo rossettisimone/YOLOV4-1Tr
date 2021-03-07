@@ -56,7 +56,7 @@ model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], 
 
 with strategy.scope():
     model.load_weights(filepath.format(epoch = cfg.FINE_TUNING,\
-                                       val_alb_total_loss = train_history.history['val_alb_loss'][cfg.FINE_TUNING-1]))
+                                       val_alb_loss = train_history.history['val_alb_loss'][cfg.FINE_TUNING-1]))
     model.compile(optimizer)
     fine_tuning(model)
     dataset.train_ds = dataset.initilize_train_ds() # shuffle
