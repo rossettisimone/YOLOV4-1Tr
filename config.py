@@ -2,6 +2,7 @@ GPU = '0'
 #GPU = '0,1,2,3'
 
 DATASET_TYPE = 'ava'
+NET_TYPE = '5'
 
 # AVA_path 
 VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
@@ -22,7 +23,7 @@ MIN_BOX_DIM = 0.02
 MIN_BOX_RATIO = 0.2
 
 # Input 
-BATCH = 8
+BATCH = 2
 TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
@@ -66,8 +67,8 @@ GRADIENT_CLIP = 5.0
 EPOCHS = 60
 FINE_TUNING = 2
 
-CONF_THRESH = 0.2
-NMS_THRESH = 0.05
+CONF_THRESH = 0.5
+NMS_THRESH = 0.7
 STEPS_PER_EPOCH_TRAIN = 1000
 STEPS_PER_EPOCH_VAL = 100
 

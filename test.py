@@ -258,13 +258,13 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1)
 _ = model.infer(iterator.__iter__().next()[0])
 
-for data in iterator.take(1):
+for data in iterator.take(10):
     image, gt_masks, gt_bboxes = data
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 #    start = time.perf_counter()
     predictions = model.infer(image)
     preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask = predictions
-#    pred_mask *= 10
+    pred_mask *= 10
     predictions = preds, embs, proposals, pred_class_logits, pred_class, pred_bbox, pred_mask
 #    end = time.perf_counter()-start
     i+=1

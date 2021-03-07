@@ -94,6 +94,7 @@ def test_encode_decode_loss():
     from utils import preprocess_mrcnn
     from utils import decode_labels,crop_and_resize,xyxy2xywh
     import config as cfg
+    import tensorflow as tf
 
     ds = DataLoader(shuffle=True, augment=True)
     iterator = ds.train_ds.unbatch().batch(1).__iter__()

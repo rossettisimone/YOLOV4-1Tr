@@ -206,8 +206,6 @@ def decode_mask(proposal, prob, bbox_mrcnn, mask_mrcnn, mode='keep'):
         pred_class_id = tf.cast(total_conf[mask]>0, tf.int32).numpy()
         return proposal[mask], bbox_mrcnn[mask], pred_class_id, total_conf[mask], mask_mrcnn[...,mask]
     else:
-        print('rpn: ',conf)
-        print('mask: ',conf_mrcnn)
         pred_class_id = tf.cast(total_conf>cfg.CONF_THRESH, tf.int32).numpy()
         return proposal, bbox_mrcnn, pred_class_id, total_conf, mask_mrcnn
     
