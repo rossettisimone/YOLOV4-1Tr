@@ -2,8 +2,7 @@ GPU = '0'
 #GPU = '0,1,2,3'
 
 DATASET_TYPE = 'ava'
-NET_TYPE = '5'
-
+NET_TYPE = '3'
 # AVA_path 
 VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
 SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"
