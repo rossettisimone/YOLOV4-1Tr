@@ -61,7 +61,7 @@ def test_loss_mrcnn():
     assert tf.equal(loss, 0)
     
 def test_encode_decode():
-    from loader import DataLoader
+    from loader_avakin import DataLoader
     from utils import draw_bbox, encode_labels
     from utils import preprocess_mrcnn
     from utils import decode_target_mask
@@ -84,7 +84,7 @@ def test_encode_decode():
     
     
 def test_encode_decode_loss():
-    from loader import DataLoader
+    from loader_avakin import DataLoader
     from utils import encode_labels
     from utils import preprocess_mrcnn
     from utils import decode_labels,crop_and_resize,xyxy2xywh
@@ -109,7 +109,7 @@ def test_encode_decode_loss():
 
 def test_tf_mask_transform(NUM_TESTS=10, verbose = 0):
 
-    from loader import DataLoader
+    from loader_avakin import DataLoader
     from utils import draw_bbox
     import matplotlib.pyplot as plt
     import numpy as np

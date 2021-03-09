@@ -35,7 +35,7 @@ else:
 #with mirrored_strategy.scope():
 
 #from models import MSDS
-#from loader import DataLoader 
+#from loader_avakin import DataLoader 
 
 # tensorboard --logdir /media/data4/Models/simenv/tracker/logdir --port 6006
 # scp /home/fiorapirri/Documents/workspace/tracker4/weights/yolov4.weights alcor@Alcor:/media/data4/Models/simenv/tracker/weights/yolov4.weights
@@ -54,7 +54,7 @@ else:
 import matplotlib.pyplot as plt
 import numpy as np
 from utils import draw_bbox, xyxy2xywh, decode_delta, xywh2xyxy, decode_delta_map, check_proposals,nms_proposals, preprocess_mrcnn
-from loader import DataLoader 
+from loader_avakin import DataLoader 
 import time
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure

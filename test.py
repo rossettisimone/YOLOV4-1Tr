@@ -12,7 +12,7 @@ import env
 import os
 import config as cfg
 import tensorflow as tf
-from loader import DataLoader 
+from loader_avakin import DataLoader 
 from model import get_model
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKPOINT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -28,7 +28,7 @@ optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
                                 nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
 model.compile(optimizer)
 
-from loader import DataLoader
+from loader_avakin import DataLoader
 from utils import encode_labels, preprocess_mrcnn
 from model import compute_loss
 
@@ -75,7 +75,7 @@ print("Fps:", trials/timeit.timeit(lambda: model.infer(input_data), number=trial
 
 import timeit
 
-from loader import DataLoader 
+from loader_avakin import DataLoader 
 
 ds = DataLoader(shuffle=True, augment=True)
 
@@ -86,7 +86,7 @@ trials = 100
 print("Time:", timeit.timeit(lambda: iterator.next(), number=trials)/trials)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET ENCODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-from loader import DataLoader
+from loader_avakin import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize
 import matplotlib.pyplot as plt
 
@@ -115,7 +115,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-#model.load_weights('/home/fiorapirri/tracker/weights/model.33--11.166.h5')
+model.load_weights('/media/data4/Models/simenv/tracker/2021-03-07-17-45-20/weights/model.45--6.217.h5')
 
 model.trainable = False
 
@@ -126,7 +126,7 @@ model.summary()
 
 #%%
 
-from loader import DataLoader
+from loader_avakin import DataLoader
 from utils import draw_bbox, encode_labels
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -247,7 +247,7 @@ draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mo
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PREDICTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 import matplotlib.pyplot as plt
-from loader import DataLoader 
+from loader_avakin import DataLoader 
 #import time
 from utils import show_infer, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh
 
