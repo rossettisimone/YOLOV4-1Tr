@@ -35,18 +35,23 @@ TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
 
-ID_THRESH = 0.5
-FG_THRESH = 0.5
-BG_THRESH = 0.4
+ID_THRESH = 0.4
+FG_THRESH = 0.4
+BG_THRESH = 0.3
 
 IOU_THRESH = 0.5
 # Network
-NUM_CLASSES = 1
+NUM_CLASSES = 41
 
-ANCHORS = [ 13,  41,  28,  82,  51, 104,  90, 117, 
-          27,  82,  57, 165, 102, 209, 181, 235,
-          41, 124,  86, 248, 154, 313, 272, 353,
-          55, 165, 114, 331, 205, 418, 363, 470]
+ANCHORS = [2,2, 4,7, 6,14, 8,3, 
+           20,15, 22,41, 25,24, 34,48, 
+           69,61, 81,34, 100,102, 101,66, 
+           268,219, 305,84, 314,154, 378, 222]
+
+# [ 13,  41,  28,  82,  51, 104,  90, 117, 
+#           27,  82,  57, 165, 102, 209, 181, 235,
+#           41, 124,  86, 248, 154, 313, 272, 353,
+#           55, 165, 114, 331, 205, 418, 363, 470]
 
 # [ 12,  26,  21,  44,  29,  76,  39, 109,
 #            53,  61,  62, 179,  66, 103,  83, 226,
@@ -57,8 +62,9 @@ import numpy as np
 ANCHORS = np.array(np.array(ANCHORS)/416*TRAIN_SIZE,np.int32) # if want to test different input  size
 
 NUM_ANCHORS = 4
-BBOX_CLASS = 4
-BBOX_REG = 2
+BBOX_REG = 4
+BBOX_CONF = 1
+
 
 STRIDES = [ 4, 8, 16, 32]
 

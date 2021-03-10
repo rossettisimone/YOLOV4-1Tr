@@ -142,45 +142,49 @@ def main():
     from PIL import Image
     from utils import file_reader
     import config as cfg
-    lines = []
-    PATHS = ["kinetics_frames_masks_train_v1.0.json", "ava_frames_masks_train_v2.2.json"]
-    for file_path in PATHS:
-        lines += file_reader(file_path)
-        print('Train Dataset {} loaded'.format(file_path))
-    
+    import numpy as np
+    dataset = file_reader(cfg.YT_TRAIN_ANNOTATION_PATH)
+    lines = dataset['annotations']
     annotation_dims = []
 
     for line in lines:
-        v_id =  line['v_id']
-        frame_name = line['f_l'][30]
-        w, h = int(line['w']), int(line['h'])
-        ih, iw = (416, 416)
-        scale = min(iw/w, ih/h)
-        nw, nh  = int(scale * w), int(scale * h)
-        dw, dh = (iw - nw) // 2, (ih-nh) // 2
-        for l in line['p_l']:
-            box = np.array(l['bb_l'][30])
-            box = np.clip(box,0,1)
-            xx, yy = box[::2]*w/nw + dw, box[1::2]*h/nh + dh
-            box=np.array([np.min(xx),np.min(yy),np.max(xx),np.max(yy)])
-            box = np.clip(box,0,1)
-            W,H = (box[2]-box[0]), (box[3]-box[1])       
-            if W>1e-3 and H>1e-3 and W/H > 0.2 and H/W > 0.2:
+        bbox = line['bboxes']
+        v_id = line['video_id']
+        video = next(video for video in dataset['videos'] if video['id'] == v_id)
+        for box in bbox:
+            if box != None:
+                w, h = int(video['width']), int(line['height'])
+                ih, iw = (416, 416)
+                scale = min(iw/w, ih/h)
+                nw, nh  = int(scale * w), int(scale * h)
+                dw, dh = (iw - nw) // 2, (ih-nh) // 2
+                box = np.array(box)
+                box = np.array(np.r_[box[:2],box[:2]+box[2:4]], dtype = np.float32)
+                # box = box/np.r_[w,h,w,h]
+                # box = np.clip(box,0,1)
+                box *= scale
+                box += np.r_[dw,dh,dw,dh]
+                box /= np.r_[ih, iw, ih, iw]
+                # xx, yy = box[::2]*w/nw + dw, box[1::2]*h/nh + dh
+                # box=np.array([np.min(xx),np.min(yy),np.max(xx),np.max(yy)])
+                # box = np.clip(box,0,1)
+                W,H = (box[2]-box[0]), (box[3]-box[1])       
                 annotation_dims.append(tuple(map(float,(W,H))))
+    
     annotation_dims = np.array(annotation_dims)
     print(annotation_dims.shape)
     eps = 0.005
     
     if num_clusters == 0:
         for num_clusters in range(1,11): #we make 1 through 10 clusters 
-            anchor_file = join( output_dir,'anchors%d.txt'%(num_clusters))
+            anchor_file = join( output_dir,'anchors_yt_%d.txt'%(num_clusters))
 
             indices = [ random.randrange(annotation_dims.shape[0]) for i in range(num_clusters)]
             centroids = annotation_dims[indices]
             kmeans(annotation_dims,centroids,eps,anchor_file)
             print('centroids.shape', centroids.shape)
     else:
-        anchor_file = join( output_dir,'anchors%d.txt'%(num_clusters))
+        anchor_file = join( output_dir,'anchors_yt_%d.txt'%(num_clusters))
         indices = [ random.randrange(annotation_dims.shape[0]) for i in range(num_clusters)]
         centroids = annotation_dims[indices]
         kmeans(annotation_dims,centroids,eps,anchor_file)

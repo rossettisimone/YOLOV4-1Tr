@@ -30,11 +30,12 @@ class DataLoader(object):
         # json_test_dataset = file_reader(cfg.YT_TEST_ANNOTATION_PATH)
         dict_classes = json_train_dataset['categories']
         nIDs = self.count(json_train_dataset)
-        annotation_train = self.parse_frames(json_train_dataset)
+        annotations = self.parse_frames(json_train_dataset)
         # annotation_val = self.parse_frames(json_val_dataset)
-        train_list = np.arange(len(annotation_train))
+        train_list = np.arange(len(annotations))
+        nIDs = len(annotations)
         # val_list = np.arange(len(annotation_val))
-        return annotation_train, train_list, dict_classes, nIDs
+        return annotations, train_list, dict_classes, nIDs
     
     def count(self, json_dataset):
         nID = 0
@@ -60,12 +61,12 @@ class DataLoader(object):
                 new_note['areas'] = []
                 new_note['category_id'] = []
                 for notes in annotations:                    
-                    if notes['bboxes'][i] != None and notes['areas'][i] != None and notes['segmentations'][i] != None:
-                        new_note['segmentations'].append(notes['segmentations'][i]['counts'])
-                        new_note['bboxes'].append(notes['bboxes'][i])
+                    if notes['iscrowd'] == 0 and notes['bboxes'][i] != None and notes['areas'][i] != None and notes['segmentations'][i] != None:
+                        new_note['segmentations'].append(notes['segmentations'][i]['counts'].copy())
+                        new_note['bboxes'].append(notes['bboxes'][i].copy())
                         new_note['areas'].append(notes['areas'][i])
                         new_note['category_id'].append(notes['category_id'])
-                        parsed_dataset.append(new_note)
+                parsed_dataset.append(new_note)
         return parsed_dataset
             
         
@@ -127,11 +128,25 @@ class DataLoader(object):
     
     def rle_decoding(self, rle_arr, w, h):
         indices = []
+        temp_idx = 0
         for idx, cnt in zip(rle_arr[0::2], rle_arr[1::2]):
-            indices.extend(list(range(idx-1, idx+cnt-1)))  # RLE is 1-based index
+            temp_idx += idx
+            indices.extend(list(range(temp_idx, temp_idx+cnt-1)))  # RLE is 1-based index
+            temp_idx += cnt
         mask = np.zeros(h*w, dtype=np.uint8)
         mask[indices] = 1
         return mask.reshape((w, h)).T
+
+    # from itertools import groupby
+
+    # def binary_mask_to_rle(binary_mask):
+    #     rle = {'counts': [], 'size': list(binary_mask.shape)}
+    #     counts = rle.get('counts')
+    #     for i, (value, elements) in enumerate(groupby(binary_mask.ravel(order='F'))):
+    #         if i == 0 and value == 1:
+    #             counts.append(0)
+    #         counts.append(len(list(elements)))
+    #     return rle
 
     def _data_generator(self, index):
         sample = self.annotation[index]
@@ -139,7 +154,7 @@ class DataLoader(object):
         width = sample['width']
         category_ids = sample['category_id']
         segmentations = sample['segmentations']
-        bboxes = sample['bboxes']
+        boxes = sample['bboxes']
         areas = sample['areas']
         file_name = sample['file_names']
         path = os.path.join(cfg.YT_TRAIN_FRAMES_PATH, file_name)
@@ -147,9 +162,9 @@ class DataLoader(object):
         masks = [] 
         try:
             image = np.array(read_image(path))
-            for segmentation, bbox, category_id in zip(segmentations, bboxes, category_ids):
-                bbox = xywh2xyxy(bbox)
-                bbox = np.array(np.r_[bbox,category_id], dtype = np.int32)
+            for segmentation, bbox, category_id in zip(segmentations, boxes, category_ids):
+                bbox = np.array(bbox)
+                bbox = np.array(np.r_[bbox[:2],bbox[:2]+bbox[2:4],category_id], dtype = np.int32)
                 if bbox[2]>bbox[0] and bbox[3]>bbox[1]:
                     try:
                         mask = self.rle_decoding(segmentation, width, height)

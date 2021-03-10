@@ -12,7 +12,7 @@ import env
 import config as cfg
 import tensorflow as tf
 import tensorflow_addons as tfa
-from loader_avakin import DataLoader 
+from loader_ytvos import DataLoader 
 from model import get_model
 from utils import  FreezeBackbone, EarlyStoppingRPN, fine_tuning, folders
 
