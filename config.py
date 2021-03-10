@@ -1,5 +1,5 @@
 # GPU = '0'
-GPU = '0,1'
+GPU = '0,1,2,3'
 
 DATASET_TYPE = 'ava'
 NET_TYPE = '3'
@@ -21,7 +21,7 @@ YT_VAL_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/valid_all_frames/JPEGIm
 YT_TEST_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/test_all_frames/test.json"
 YT_TEST_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/test_all_frames/JPEGImages/"
 
-SPLIT_RATIO = .3
+SPLIT_RATIO = .1
 SHUFFLE = True
 DATA_AUGMENT = True
 LOGDIR = 'logdir'
