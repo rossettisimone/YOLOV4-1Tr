@@ -154,7 +154,8 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
     positive_ix = tf.where(target_class_ids > 0)[:, 0]
     positive_class_ids = tf.cast(
         tf.gather(target_class_ids, positive_ix), tf.int64)
-    indices = tf.stack([positive_ix, positive_class_ids-1], axis=1)
+    positive_class_ids = positive_class_ids-1 # classes starts by 1..41 thus indices 0 to 40
+    indices = tf.stack([positive_ix, positive_class_ids], axis=1)
 
     # Gather the masks (predicted and true) that contribute to loss
     y_true = tf.gather(target_masks, positive_ix)

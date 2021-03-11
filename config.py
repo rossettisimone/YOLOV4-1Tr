@@ -4,15 +4,15 @@ GPU = '0,1'
 DATASET_TYPE = 'ava'
 NET_TYPE = '3'
 # AVA_path 
-# AVA_VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
-# AVA_SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"
-# AVA_TRAIN_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
-# AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
+AVA_VIDEOS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/frames"
+AVA_SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/segments"
+AVA_TRAIN_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
+AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 
-AVA_VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
-AVA_SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
-AVA_TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
-AVA_VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+#AVA_VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
+#AVA_SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
+#AVA_TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
+#AVA_VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
 YT_TRAIN_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/train_all_frames/train.json"
 YT_TRAIN_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/train_all_frames/JPEGImages/"
@@ -87,6 +87,7 @@ STEPS_PER_EPOCH_VAL = 100
 
 PRE_NMS_LIMIT = 200
 MAX_PROP = 50
+MAX_PROP_PER_CLASS = 10
 
 TOP_DOWN_PYRAMID_SIZE = 256
 MASK_LAYERS_SIZE = 256

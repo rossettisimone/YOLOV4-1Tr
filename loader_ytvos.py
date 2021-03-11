@@ -155,7 +155,7 @@ class DataLoader(object):
         category_ids = sample['category_id']
         segmentations = sample['segmentations']
         boxes = sample['bboxes']
-        areas = sample['areas']
+#        areas = sample['areas']
         file_name = sample['file_names']
         path = os.path.join(cfg.YT_TRAIN_FRAMES_PATH, file_name)
         bboxes = []
