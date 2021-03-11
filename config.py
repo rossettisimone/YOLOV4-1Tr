@@ -1,5 +1,5 @@
 # GPU = '0'
-GPU = '0,1,2,3'
+GPU = '0,1,2'
 
 DATASET_TYPE = 'ava'
 NET_TYPE = '3'
@@ -9,10 +9,10 @@ NET_TYPE = '3'
 # AVA_TRAIN_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 # AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 
-AVA_VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
-AVA_SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
-AVA_TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
-AVA_VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+# AVA_VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
+# AVA_SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
+# AVA_TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
+# AVA_VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
 YT_TRAIN_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/train_all_frames/train.json"
 YT_TRAIN_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/train_all_frames/JPEGImages/"
@@ -26,8 +26,8 @@ SHUFFLE = True
 DATA_AUGMENT = True
 LOGDIR = 'logdir'
 WEIGHTS = 'weights'
-MIN_BOX_DIM = 0.02
-MIN_BOX_RATIO = 0.2
+MIN_BOX_DIM = 0.01
+MIN_BOX_RATIO = 0.1
 
 # Input 
 BATCH = 8

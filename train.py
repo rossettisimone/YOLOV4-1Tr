@@ -15,6 +15,7 @@ import tensorflow_addons as tfa
 from loader_ytvos import DataLoader 
 from model import get_model
 from utils import  FreezeBackbone, EarlyStoppingRPN, fine_tuning, folders
+# tf.config.optimizer.set_jit(True)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

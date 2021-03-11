@@ -80,9 +80,9 @@ from loader_ytvos import DataLoader
 ds = DataLoader(shuffle=True, augment=True)
 
 #%%
-iterator = ds.train_ds.__iter__()
+iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
-trials = 2
+trials = 100
 
 print("Time:", timeit.timeit(lambda: iterator.next(), number=trials)/trials)
 
