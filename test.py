@@ -120,7 +120,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/media/data4/Models/simenv/tracker/2021-03-07-17-45-20/weights/model.45--6.217.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.14--8.098.h5')
 
 model.trainable = False
 
@@ -270,12 +270,13 @@ for data in iterator.take(10):
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
     pred_mask *= 10
+    pred_mask = pred_mask[...,0:1]
     predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
     i+=1
 #    sec += end
 #    print(i/sec)
-    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
     show_infer(data_, predictions)
     AP += show_mAP(data_, predictions)

@@ -228,15 +228,15 @@ def decode_ground_truth(gt_bboxes, gt_masks):
 def show_infer(data, prediction):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     nB = tf.shape(image)[0]
-    if len(prediction)>3:
-        preds, proposals, bboxes, masks = prediction
+    if len(prediction)>2:
+        preds, proposals, masks = prediction
         for i in range(nB):
-            proposals, bbox_mrcnn, id_mrcnn, conf, mask_mrcnn = decode_mask(proposals[i], bboxes[i], masks[i], 'cut')
-            if len(bbox_mrcnn)>0:
-                draw_bbox(image[i], bboxs = bbox_mrcnn, prop = proposals, masks = mask_mrcnn, conf_id = conf, mode= 'PIL')
+            bbox, pred_class_id, conf, mask_mrcnn = decode_mask(proposals[i], masks[i], 'cut')
+            if len(bbox)>0:
+                draw_bbox(image[i], bboxs = bbox, prop = bbox, masks = mask_mrcnn, conf_id = conf, mode= 'PIL')
             else:
                 show_image(tf.cast(image*255,tf.uint8).numpy()[i])
-            tf.print('Found {} subjects'.format(len(bbox_mrcnn)))
+            tf.print('Found {} subjects'.format(len(bbox)))
     else:
         preds, proposals = prediction
         for i in range(nB):
@@ -251,11 +251,11 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     nB = tf.shape(image)[0]
     mean_AP = []
-    if len(prediction)>3: # if masks are present TODO
+    if len(prediction)>2: # if masks are present TODO
         preds, proposals, masks = prediction
         for i in range(nB):
             gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
-            _, pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], masks[i])
+            pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], masks[i])
             if len(gt_bbox)>0: # this is never the case but better to put
                 AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
                          pred_box, pred_class_id, pred_score, pred_mask,
@@ -616,14 +616,13 @@ def decode_prediction(prediction, anchors, stride):
     pconf = tf.nn.sigmoid(pconf) # 1 is foreground
     ppred = prediction[..., 5:] # class
     ppred = tf.nn.sigmoid(ppred)
-    pconf = pconf * ppred
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
     pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
     pbox = xywh2xyxy(pbox) # to bbox
     pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
-    proposal = tf.concat([pbox, pconf], axis=-1) 
+    proposal = tf.concat([pbox, pconf, ppred], axis=-1) 
     nB = tf.shape(proposal)[0]
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC])
@@ -655,50 +654,56 @@ def check_proposals_tensor(proposal):
     indices = tf.tile(tf.cast(mask, tf.float32)[...,tf.newaxis],(1,1,nC))
     proposal = tf.multiply(proposal, indices) # remove the bad proposals
     
-    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable=True)
+    pconf = proposal[..., 4]
+    
+    indices = tf.argsort(pconf, axis=-1, direction='DESCENDING', stable=True)[...,:cfg.PRE_NMS_LIMIT]
 
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
-    proposal = nms_proposals_tensor(proposal, size = cfg.PRE_NMS_LIMIT) # automatic zero padding
+#    proposal = nms_proposals_tensor(proposal, size = cfg.PRE_NMS_LIMIT) # automatic zero padding
     return proposal
 
-def check_proposals(proposal):
-    # remove unconsistent bboxes; x2>x1 and y2>y1
-    width = proposal[...,2] - proposal[...,0]
-    height = proposal[...,3] - proposal[...,1]
-    
-    mask_dim = tf.logical_and(tf.greater(width, cfg.MIN_BOX_DIM), tf.greater(height, cfg.MIN_BOX_DIM))
-    mask_ratio = tf.logical_and(tf.greater(width/height, cfg.MIN_BOX_RATIO),\
-        tf.greater(height/width, cfg.MIN_BOX_RATIO))
-    mask = tf.logical_and(mask_dim,mask_ratio)
-    
-    indices = tf.squeeze(tf.where(mask),axis=-1)
-    proposal = tf.gather(proposal,indices, axis=0)
-
-    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable = True)[...,:cfg.PRE_NMS_LIMIT]
-    proposal = tf.gather(proposal,indices, axis=0)
-    
-    # proposal = nms_proposals_tensor(proposal[None], size = cfg.PRE_NMS_LIMIT)[0] # automatic zero padding
-
-    return proposal
+#def check_proposals(proposal):
+#    # remove unconsistent bboxes; x2>x1 and y2>y1
+#    width = proposal[...,2] - proposal[...,0]
+#    height = proposal[...,3] - proposal[...,1]
+#    
+#    mask_dim = tf.logical_and(tf.greater(width, cfg.MIN_BOX_DIM), tf.greater(height, cfg.MIN_BOX_DIM))
+#    mask_ratio = tf.logical_and(tf.greater(width/height, cfg.MIN_BOX_RATIO),\
+#        tf.greater(height/width, cfg.MIN_BOX_RATIO))
+#    mask = tf.logical_and(mask_dim,mask_ratio)
+#    
+#    indices = tf.squeeze(tf.where(mask),axis=-1)
+#    proposal = tf.gather(proposal,indices, axis=0)
+#
+#    indices = tf.argsort(proposal[..., 4], axis=-1, direction='DESCENDING', stable = True)[...,:cfg.PRE_NMS_LIMIT]
+#    proposal = tf.gather(proposal,indices, axis=0)
+#    
+#    # proposal = nms_proposals_tensor(proposal[None], size = cfg.PRE_NMS_LIMIT)[0] # automatic zero padding
+#
+#    return proposal
     
 def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
     """This function compute nms proposals without iterating over the batch """
+    pconf = proposal[...,4:5]
+    ppred = proposal[...,5:]
+    pconf = pconf * ppred
+    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
     proposal, conf, category, *_ = tf.image.combined_non_max_suppression(
-            proposal[...,:4][:,:,tf.newaxis,:], proposal[...,4:], max_output_size_per_class=size, \
+            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
             max_total_size=size, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
 
     proposal = tf.concat([proposal,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
     return proposal
 
-def nms_proposals(proposal):
-    # non max suppression
-    indices = tf.image.non_max_suppression(proposal[...,:4], proposal[...,4], max_output_size=cfg.MAX_PROP, 
-                         iou_threshold=cfg.NMS_THRESH) # score_threshold=cfg.CONF_THRESH
-    proposal = tf.gather(proposal, indices) #b x n rois x (4+1+1+208)
-    
-    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP)) # automatic zero padding
-
-    return proposal
+#def nms_proposals(proposal):
+#    # non max suppression
+#    indices = tf.image.non_max_suppression(proposal[...,:4], proposal[...,4], max_output_size=cfg.MAX_PROP, 
+#                         iou_threshold=cfg.NMS_THRESH) # score_threshold=cfg.CONF_THRESH
+#    proposal = tf.gather(proposal, indices) #b x n rois x (4+1+1+208)
+#    
+#    proposal = tf.gather(proposal,tf.range(cfg.MAX_PROP)) # automatic zero padding
+#
+#    return proposal
 
 ###############################################################################################
 #################################   MASK RCNN PROCESSING   ####################################
@@ -722,12 +727,15 @@ def preprocess_target_mask(proposal_gt_mask):
 def preprocess_target_indices(proposal_gt_mask):
     """ proposal: [num_rois, (x, y, w, h)] 
         gt_bbox: [num_gt_bbox, (x, y, w, h)] """
-    proposal, gt_bbox = proposal_gt_mask
+    proposal, gt_bbox, gt_class_id = proposal_gt_mask
     gt_intersect = bbox_iou(proposal,gt_bbox)
     target_indices = tf.math.argmax(gt_intersect,axis=-1)
     # Determine positive and negative ROIs
     valid_indices = tf.reduce_max(gt_intersect, axis=-1)
-    target_class_ids = tf.cast(valid_indices >= cfg.IOU_THRESH, tf.int64) # in this dataset if there is bbox, it's human, 1 class
+    target_class_ids = tf.cast(valid_indices >= cfg.IOU_THRESH, tf.int64) # there is bbox
+    gt_class_id = tf.cast(gt_class_id,  tf.int64)
+    gt_class_id = tf.gather(gt_class_id, target_indices)
+    target_class_ids *= tf.cast(gt_class_id,  tf.int64)
     return target_indices, target_class_ids 
 #
 #
@@ -785,15 +793,18 @@ def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
      target_class_ids: [batch, num_rois]. Integer class IDs.
      target_masks: [batch, num_rois, height, width].
         A float32 tensor of values 0 or 1. """
+    gt_class_ids = gt_bboxes[...,4]
     gt_bboxes = gt_bboxes[...,:4]
     gt_bboxes /= cfg.TRAIN_SIZE
 #    gt_bboxes = tf.clip_by_value(gt_bboxes, 0.0, 1.0) # redundant
     gt_bboxes = xyxy2xywh(gt_bboxes)
     proposals = tf.stop_gradient(proposals)
     proposals = proposals[...,:4]
+#    conf = proposals[...,4:5]
+#    class_ids = proposals[...,5:6]
 #    proposals = tf.clip_by_value(proposals, 0.0, 1.0) # redundant
     proposals = xyxy2xywh(proposals)  
-    target_indices, target_class_ids = tf.map_fn(preprocess_target_indices, (proposals, gt_bboxes), fn_output_signature=(tf.int64,tf.int64))
+    target_indices, target_class_ids = tf.map_fn(preprocess_target_indices, (proposals, gt_bboxes, gt_class_ids), fn_output_signature=(tf.int64,tf.int64))
     target_masks = tf.map_fn(preprocess_target_mask, (proposals, gt_masks, target_indices), fn_output_signature=tf.float32)
     
     target_masks = tf.cond(tf.greater(tf.reduce_sum(target_class_ids),0), lambda: tf.map_fn(crop_and_resize, (proposals, target_class_ids, target_masks), fn_output_signature=tf.float32),lambda: target_masks)
