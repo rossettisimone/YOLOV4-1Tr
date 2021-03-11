@@ -21,6 +21,17 @@ import tensorflow_addons as tfa
 ####################################   PREPROCESSING   ########################################
 ###############################################################################################
 
+def rle_decoding( rle_arr, w, h):
+    indices = []
+    temp_idx = 0
+    for idx, cnt in zip(rle_arr[0::2], rle_arr[1::2]):
+        temp_idx += idx
+        indices.extend(list(range(temp_idx, temp_idx+cnt-1)))  # RLE is 1-based index
+        temp_idx += cnt
+    mask = np.zeros(h*w, dtype=np.uint8)
+    mask[indices] = 1
+    return mask.reshape((w, h)).T
+
 def folders():
     folder = "{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
     os.mkdir(folder)
@@ -228,12 +239,12 @@ def decode_ground_truth(gt_bboxes, gt_masks):
 def show_infer(data, prediction):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     nB = tf.shape(image)[0]
-    if len(prediction)>3:
-        preds, proposals, bboxes, masks = prediction
+    if len(prediction)>2:
+        preds, proposals, masks = prediction
         for i in range(nB):
-            proposals, bbox_mrcnn, id_mrcnn, conf, mask_mrcnn = decode_mask(proposals[i], bboxes[i], masks[i], 'cut')
+            bbox_mrcnn, id_mrcnn, conf, mask_mrcnn = decode_mask(proposals[i], masks[i], 'cut')
             if len(bbox_mrcnn)>0:
-                draw_bbox(image[i], bboxs = bbox_mrcnn, prop = proposals, masks = mask_mrcnn, conf_id = conf, mode= 'PIL')
+                draw_bbox(image[i], bboxs = bbox_mrcnn, prop = bbox_mrcnn, masks = mask_mrcnn, conf_id = conf, mode= 'PIL')
             else:
                 show_image(tf.cast(image*255,tf.uint8).numpy()[i])
             tf.print('Found {} subjects'.format(len(bbox_mrcnn)))
