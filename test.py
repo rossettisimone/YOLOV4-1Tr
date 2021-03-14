@@ -30,27 +30,31 @@ import tensorflow_addons as tfa
 
 #from loader_avakin import DataLoader
 from utils import encode_labels, preprocess_mrcnn
+from layers import yolov4_plus1_proposal_graph
 from model import compute_loss
 #
 #ds = DataLoader(shuffle=True, augment=False)
 #iterator = ds.train_ds.unbatch().batch(1).__iter__()
-data = iterator.next()
-
-image, gt_masks, gt_bboxes = data
+image, gt_masks, gt_bboxes = iterator.next()
+gt_bboxes
 label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
-data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
+
 
 training = True
-image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
-labels = [label_2, labe_3, label_4, label_5]
+labels = [label_2, label_3, label_4, label_5]
 #with tf.GradientTape() as tape:
-preds, proposals, pred_mask = model(image, training=training)
-class_ids = tf.argmax(proposals[...,5:],axis=-1)
-proposals = proposals[...,:4]
-target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
+preds, proposals, pred_masks = model(image, training=training)
+#preds = labels
+
+#proposals = yolov4_plus1_proposal_graph(preds)
+
+proposal = proposals[...,:4]
+
+target_class_ids, target_masks = preprocess_mrcnn(proposal, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+#pred_masks = target_masks[...,None]
+
+alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposal, target_class_ids, target_masks, pred_masks, training)
 #gradients = tape.gradient(alb_total_loss, model.trainable_variables)
-print(loss_list[-1])
 #optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables))
 #
 #for (grad, var) in zip(gradients, model.trainable_variables):
@@ -115,10 +119,10 @@ for i in range(1):
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
         
-    predictions = [label_2,label_3,label_4,label_5]
-    proposals = yolov4_plus1_proposal_graph(predictions)
-    class_ids = tf.cast(tf.argmax(proposals[...,5:],axis=-1),tf.float32)+1.
-    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
+#    predictions = [label_2,label_3,label_4,label_5]
+#    proposals = yolov4_plus1_proposal_graph(predictions)
+#    class_ids = tf.cast(tf.argmax(proposals[...,5:],axis=-1),tf.float32)+1.
+#    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
 
 #%%
 from model import get_model
@@ -127,7 +131,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.14--9.253.h5')
+model.load_weights('/home/fiorapirri/tracker/2021-03-14-16-45-57/weights/model.02--3.974.h5')
 
 model.trainable = False
 
@@ -270,23 +274,21 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
-for i in range(10):
+for i in range(1):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 #    start = time.perf_counter()
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
-    class_ids = tf.cast(tf.argmax(proposals[...,5:],axis=-1),tf.int32)+1
-    pred_mask *= 3
+    class_ids = tf.cast(proposals[...,5], tf.int32)
+    pred_mask *= 10
     pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
     indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
     pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]
-    pbox, pconf, pclass = tf.split(proposals, (4,1,41), axis=-1)
-    pclass+=1
-    pconf*=10
-    print(pclass)
-    proposals = tf.concat([pbox, pconf, tf.cast(class_ids[...,None],tf.float32)],axis=-1)
+    pbox, pconf, pclass = tf.split(proposals, (4,1,1), axis=-1)
+    pconf*=30
+    proposals = tf.concat([pbox, pconf, pclass],axis=-1)
     predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
     i+=1

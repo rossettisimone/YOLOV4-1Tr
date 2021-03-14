@@ -95,19 +95,15 @@ def compute_loss_rpn(model, labels, preds):
     return alb_loss, box_loss, conf_loss
 
 def compute_loss_rpn_level(label, pred):
-    pbox = pred[..., :4]
-    pconf = pred[..., 4:]
-    tbox = label[...,:4]
-    tconf = label[...,4:5]
-    tid = label[..., 5:6]
-    tid = tf.cast(tid,tf.float32)
+    pbox, pconf = pred[..., :4], pred[..., 4:]
+    tbox, tconf, tid = label[...,:4], label[...,4:5], label[..., 5]
+    tid = tf.cast(tid,tf.int32)
     mask = tf.tile(tf.cast(tf.greater(tconf,0.0), tf.float32),(1,1,1,1,4))
     lbox = tf.cond(tf.greater(tf.reduce_sum(mask),0.0), lambda: \
                    tf.reduce_mean(smooth_l1_loss(y_true = tbox * mask,y_pred = pbox * mask)), lambda: tf.constant(0.0))
     non_negative_entry = tf.cast(tf.greater_equal(tconf,0.0),tf.float32)
     pconf = entry_stop_gradients(pconf, non_negative_entry) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
-#    tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf),tf.int32)
-    lconf = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tid,logits=pconf)) # apply softmax and do non negative log likelihood loss 
+    lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid,logits=pconf)) # apply softmax and do non negative log likelihood loss 
     return lbox, lconf
 
 def compute_loss_mrcnn(model, proposals, target_class_ids, target_masks, pred_masks):
