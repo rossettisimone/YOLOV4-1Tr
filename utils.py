@@ -188,6 +188,7 @@ def decode_proposal(proposal, mode='cut'):
 
 def decode_mask(proposal, mask_mrcnn, mode='keep'):
     conf = proposal[...,4].numpy()
+    class_id = proposal[...,5].numpy()
     bbox = proposal[...,:4]
     bbox = tf.round(bbox*cfg.TRAIN_SIZE).numpy()
     mask_mrcnn = mask_mrcnn[...,0]
@@ -196,7 +197,7 @@ def decode_mask(proposal, mask_mrcnn, mode='keep'):
     if mode == 'cut':
         mask = conf>cfg.CONF_THRESH
         pred_class_id = tf.cast(conf[mask]>0, tf.int32).numpy()
-        return bbox[mask], pred_class_id, conf[mask], mask_mrcnn[...,mask]
+        return bbox[mask], pred_class_id, class_id[mask], mask_mrcnn[...,mask]
     else:
         pred_class_id = tf.cast(conf>cfg.CONF_THRESH, tf.int32).numpy()
         return bbox, pred_class_id, conf, mask_mrcnn
@@ -441,14 +442,6 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     tconf = tf.where(bg_index, 0.0, tconf)
     tconf = tf.where(ign_index, -1.0, tconf)
     tconf = tconf[...,None]
-    
-    # onehot = np.zeros(self.num_classes, dtype=np.float)
-    # onehot[bbox_class_ind] = 1.0
-    # uniform_distribution = np.full(
-    #     self.num_classes, 1.0 / self.num_classes
-    # )
-    # deta = 0.01
-    # smooth_onehot = onehot * (1 - deta) + deta * uniform_distribution
 
     gt_index = tf.boolean_mask(gt_index_map,fg_index)
     gt_box_list = tf.gather(gt_boxes,gt_index)
@@ -617,6 +610,19 @@ def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
     proposal = tf.concat([proposal,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
     return proposal
 
+
+# Non-max suppression
+def nms(proposals):
+    boxes, scores = proposals[...,:4], proposals[...,4]
+    indices = tf.image.non_max_suppression(
+        boxes, scores, cfg.MAX_PROP,
+        cfg.NMS_THRESH)
+    proposals = tf.gather(boxes, indices)
+    # Pad if needed
+    padding = tf.maximum(cfg.MAX_PROP - tf.shape(proposals)[0], 0)
+    proposals = tf.pad(proposals, [(0, padding), (0, 0)])
+    return proposals
+
 ###############################################################################################
 #################################   MASK RCNN PROCESSING   ####################################
 ###############################################################################################
@@ -659,7 +665,7 @@ def crop_and_resize(proposal_gt_bbox_gt_mask):
     target_mask = tf.gather(target_mask, targets, axis=0)
     box_indices = tf.range((tf.shape(targets)[0]),dtype=tf.int32)
     target_mask = tf.image.crop_and_resize(target_mask[...,tf.newaxis], proposals_,\
-                                           box_indices = box_indices, crop_size=(cfg.MASK_SIZE,cfg.MASK_SIZE))[...,0]
+                                           box_indices = box_indices, crop_size=(cfg.MASK_SIZE,cfg.MASK_SIZE),method="bilinear")[...,0]
     target_mask = tf.round(target_mask)
     target_mask = tf.clip_by_value(target_mask,0.0,1.0)
     target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(cfg.MAX_INSTANCES,cfg.MASK_SIZE,cfg.MASK_SIZE))

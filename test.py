@@ -19,38 +19,38 @@ from model import get_model
 
 import tensorflow_addons as tfa
 
-model = get_model()
+#model = get_model()
+#
+##model.summary()
+#
+#optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
+#                                learning_rate = cfg.LR, momentum = cfg.MOM, \
+#                                nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
+#model.compile(optimizer)
 
-#model.summary()
-
-optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
-                                learning_rate = cfg.LR, momentum = cfg.MOM, \
-                                nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
-model.compile(optimizer)
-
-from loader_avakin import DataLoader
+#from loader_avakin import DataLoader
 from utils import encode_labels, preprocess_mrcnn
 from model import compute_loss
-
-ds = DataLoader(shuffle=True, augment=False)
-iterator = ds.train_ds.unbatch().batch(1).__iter__()
+#
+#ds = DataLoader(shuffle=True, augment=False)
+#iterator = ds.train_ds.unbatch().batch(1).__iter__()
 data = iterator.next()
 
-image, gt_mask, gt_masks, gt_bboxes = data
-label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_mask), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+image, gt_masks, gt_bboxes = data
+label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
 
 training = True
 image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
 labels = [label_2, labe_3, label_4, label_5]
-with tf.GradientTape() as tape:
-    preds, proposals, pred_mask = model(image, training=training)
-    proposals = proposals[...,:4]
-    target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-    alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
-gradients = tape.gradient(alb_total_loss, model.trainable_variables)
+#with tf.GradientTape() as tape:
+preds, proposals, pred_mask = model(image, training=training)
+proposals = proposals[...,:4]
+target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
+#gradients = tape.gradient(alb_total_loss, model.trainable_variables)
 print(loss_list[-1])
-optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables))
+#optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables))
 #
 #for (grad, var) in zip(gradients, model.trainable_variables):
 #    print(var.name)
@@ -120,11 +120,11 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.14--8.098.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.14--9.253.h5')
 
 model.trainable = False
 
-model.summary()
+#model.summary()
 
 #model.outputs
 
@@ -252,7 +252,7 @@ draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mo
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PREDICTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 import matplotlib.pyplot as plt
-from loader_avakin import DataLoader 
+from loader_ytvos import DataLoader 
 #import time
 from utils import show_infer, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh
 
@@ -260,17 +260,26 @@ i = 0
 sec = 0
 AP = 0
 ds = DataLoader(shuffle=True, augment=False)
-iterator = ds.train_ds.unbatch().batch(1)
-_ = model.infer(iterator.__iter__().next()[0])
-
-for data in iterator.take(10):
+iterator = ds.train_ds.unbatch().batch(1).__iter__()
+_ = model.infer(iterator.next()[0])
+#%%
+for i in range(1):
+    data = iterator.next()
     image, gt_masks, gt_bboxes = data
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 #    start = time.perf_counter()
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
-    pred_mask *= 10
-    pred_mask = pred_mask[...,0:1]
+    pred_mask *= 3
+    class_ids = tf.cast(proposals[...,5],tf.int32)
+    pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
+    indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
+    pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]
+    pbox, pconf, pclass = tf.split(proposals, (4,1,1), axis=-1)
+    pclass+=1
+    pconf*=10
+    print(pclass)
+    proposals = tf.concat([pbox, pconf, pclass],axis=-1)
     predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
     i+=1
@@ -282,4 +291,4 @@ for data in iterator.take(10):
     AP += show_mAP(data_, predictions)
     mAP = AP/i    
     print(mAP)
-#    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'PIL')
+    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = gt_bboxes[0,...,4].numpy(), mode= 'PIL')

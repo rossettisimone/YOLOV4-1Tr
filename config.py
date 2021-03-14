@@ -14,8 +14,8 @@ AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1
 #AVA_TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
 #AVA_VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
-YT_TRAIN_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/train_all_frames/train.json"
-YT_TRAIN_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/train_all_frames/JPEGImages/"
+YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/train.json"
+YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/JPEGImages/"
 YT_VAL_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/valid_all_frames/valid.json"
 YT_VAL_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/valid_all_frames/JPEGImages/"
 YT_TEST_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/test_all_frames/test.json"
