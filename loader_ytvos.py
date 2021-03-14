@@ -66,7 +66,8 @@ class DataLoader(object):
                         new_note['bboxes'].append(notes['bboxes'][i].copy())
                         new_note['areas'].append(notes['areas'][i])
                         new_note['category_id'].append(notes['category_id'])
-                parsed_dataset.append(new_note)
+                if len(new_note['segmentations'])>0:
+                    parsed_dataset.append(new_note)
         return parsed_dataset
             
         
@@ -128,11 +129,9 @@ class DataLoader(object):
     
     def rle_decoding(self, rle_arr, w, h):
         indices = []
-        temp_idx = 0
-        for idx, cnt in zip(rle_arr[0::2], rle_arr[1::2]):
-            temp_idx += idx
-            indices.extend(list(range(temp_idx, temp_idx+cnt-1)))  # RLE is 1-based index
-            temp_idx += cnt
+        rle_arr = np.cumsum(rle_arr)
+        for start, end in zip(rle_arr[0::2], rle_arr[1::2]):
+             indices.extend(list(range(start, end)))
         mask = np.zeros(h*w, dtype=np.uint8)
         mask[indices] = 1
         return mask.reshape((w, h)).T

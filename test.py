@@ -8,6 +8,7 @@ Created on Mon Feb 15 21:08:40 2021
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% BUILD ENV %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import env
 
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import os
 import config as cfg
@@ -47,7 +48,8 @@ preds, proposals, pred_masks = model(image, training=training)
 #preds = labels
 
 #proposals = yolov4_plus1_proposal_graph(preds)
-
+class_ids = proposals[...,5]
+conf = proposals[...,4]
 proposal = proposals[...,:4]
 
 target_class_ids, target_masks = preprocess_mrcnn(proposal, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
@@ -82,8 +84,8 @@ import timeit
 
 from loader_ytvos import DataLoader 
 
-ds = DataLoader(shuffle=True, augment=True)
-
+ds = DataLoader(shuffle=True, augment=False)
+#rle_arr = ds.annotation[100]['segmentations'][0]
 #%%
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
@@ -101,7 +103,7 @@ iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
 #%%
 from layers import yolov4_plus1_proposal_graph
-
+from utils import decode_labels
 for i in range(1):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
@@ -119,10 +121,10 @@ for i in range(1):
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
         
-#    predictions = [label_2,label_3,label_4,label_5]
-#    proposals = yolov4_plus1_proposal_graph(predictions)
-#    class_ids = tf.cast(tf.argmax(proposals[...,5:],axis=-1),tf.float32)+1.
-#    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
+    predictions = [label_2,label_3,label_4,label_5]
+    proposals = decode_labels(predictions)
+    class_ids = proposals[...,5]
+    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
 
 #%%
 from model import get_model
@@ -131,7 +133,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/2021-03-14-16-45-57/weights/model.02--3.974.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.02--5.004.h5')
 
 model.trainable = False
 
@@ -282,12 +284,12 @@ for i in range(1):
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
     class_ids = tf.cast(proposals[...,5], tf.int32)
-    pred_mask *= 10
+    pred_mask *= 3
     pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
     indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
     pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]
     pbox, pconf, pclass = tf.split(proposals, (4,1,1), axis=-1)
-    pconf*=30
+    pconf*=20
     proposals = tf.concat([pbox, pconf, pclass],axis=-1)
     predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
