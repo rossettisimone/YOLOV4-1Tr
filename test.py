@@ -96,15 +96,16 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
 #%%
+from layers import yolov4_plus1_proposal_graph
+
 for i in range(1):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
-    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, (gt_bboxes, gt_masks), fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
-    img = draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = None, mode= 'return')
-    plt.imshow(img)
-    plt.show()
+    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = gt_bboxes[0,...,4].numpy(), mode= 'PIL')
+
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_3[0],axis=0),axis=-1))
@@ -113,6 +114,11 @@ for i in range(1):
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
+        
+    predictions = [label_2,label_3,label_4,label_5]
+    proposals = yolov4_plus1_proposal_graph(predictions)
+    class_ids = tf.cast(tf.argmax(proposals[...,5:],axis=-1),tf.float32)+1.
+    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
 
 #%%
 from model import get_model
