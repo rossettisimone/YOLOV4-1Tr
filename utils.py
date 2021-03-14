@@ -67,7 +67,7 @@ def data_check( masks, bboxes):#check consistency of bbox after data augmentatio
 
 def data_pad( masks, bboxes):
     bboxes_padded = np.zeros(( cfg.MAX_INSTANCES,5))
-    bboxes_padded[:,4]=-1
+#    bboxes_padded[:,4]=-1
     masks_padded = np.zeros(( cfg.MAX_INSTANCES,masks.shape[1],masks.shape[2]))
     min_bbox = min(bboxes.shape[0],  cfg.MAX_INSTANCES)
     bboxes_padded[:min_bbox,...]=bboxes[:min_bbox,...]
@@ -451,15 +451,15 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     
     tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, 1)), tid)
     
-    indices = tf.cast(tid-1.0,tf.int32)[...,0] # -1 because we pass from id to indices 
+#    indices = tf.cast(tid-1.0,tf.int32)[...,0] # -1 because we pass from id to indices 
     
-    category_id_one_hot = tf.one_hot(indices, depth = nC, on_value=1.0, off_value=0.0,axis=-1)
+#    category_id_one_hot = tf.one_hot(indices, depth = nC, on_value=1.0, off_value=0.0,axis=-1)
     
     fg_anchor_list = anchor_mesh[fg_index] 
     delta_target = encode_delta(gt_box_list, fg_anchor_list)
     tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
         
-    label = tf.concat([tbox,tconf,category_id_one_hot],axis=-1)#tid
+    label = tf.concat([tbox,tconf,tid],axis=-1)#tid
     # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
     label = tf.transpose(label,(0,2,1,3))
     return label
@@ -554,17 +554,15 @@ def decode_delta_map(delta_map, anchors):
     
 def decode_prediction(prediction, anchors, stride):
     prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
-    pconf = prediction[..., 4:5]  # Conf
-    pconf = tf.nn.sigmoid(pconf) # 1 is foreground
-    ppred = prediction[..., 5:] # class
-    ppred = tf.nn.sigmoid(ppred)
+    pconf = prediction[..., 4:]  # class
+    pconf = tf.nn.softmax(pconf)[...,1:] # class
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
     pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
     pbox = xywh2xyxy(pbox) # to bbox
     pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
-    proposal = tf.concat([pbox, pconf, ppred], axis=-1) 
+    proposal = tf.concat([pbox, pconf], axis=-1) 
     nB = tf.shape(proposal)[0]
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC])
@@ -592,7 +590,7 @@ def check_proposals_tensor(proposal):
     mask = tf.logical_and(mask_dim,mask_ratio)
     indices = tf.tile(tf.cast(mask, tf.float32)[...,tf.newaxis],(1,1,nC))
     proposal = tf.multiply(proposal, indices) # remove the bad proposals
-    pconf = proposal[..., 4]
+    pconf = tf.reduce_max(proposal[..., 4:],axis=-1)
     indices = tf.argsort(pconf, axis=-1, direction='DESCENDING', stable=True)[...,:cfg.PRE_NMS_LIMIT]
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
 
@@ -626,7 +624,7 @@ def check_proposals_tensor(proposal):
 def nms_proposals_tensor(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = proposal[...,4]
+   pconf = tf.reduce_max(proposal[..., 4:],axis=-1)
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)

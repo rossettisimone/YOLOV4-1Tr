@@ -172,7 +172,7 @@ def yolov4_plus1_decode_graph(input_layer):
     
     n_2, n_3, n_4, n_5 = input_layer
     
-    prediction_channels = cfg.BBOX_CONF + cfg.BBOX_REG + cfg.NUM_CLASSES
+    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CONF + cfg.NUM_CLASSES
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
     e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
