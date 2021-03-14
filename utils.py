@@ -598,30 +598,52 @@ def check_proposals_tensor(proposal):
 
     return proposal
     
-def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
-    """This function compute nms proposals without iterating over the batch """
-    pconf = proposal[...,4:5]
-    ppred = proposal[...,5:]
-    pconf = pconf * ppred
-    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
-    proposal, conf, category, *_ = tf.image.combined_non_max_suppression(
-            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
-            max_total_size=size, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
-    proposal = tf.concat([proposal,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
-    return proposal
+#def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
+#    """This function compute nms proposals without iterating over the batch """
+#    pconf = proposal[...,4:5]
+#    ppred = proposal[...,5:]
+#    pconf = pconf * ppred
+#    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
+#    proposal, conf, category, *_ = tf.image.combined_non_max_suppression(
+#            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
+#            max_total_size=size, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+#    proposal = tf.concat([proposal,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
+#    return proposal
 
+#def nms_proposals_class(proposal):
+#    """This function compute nms proposals without iterating over the batch """
+#    pconf = proposal[...,4:5]
+#    ppred = proposal[...,5:]
+#    ppred = pconf * ppred
+#    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
+#    boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
+#            boxes = pboxes, scores = ppred, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
+#            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+#    category+=1.
+#    proposal = tf.concat([boxes,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
+#    return proposal
 
-# Non-max suppression
-def nms(proposals):
-    boxes, scores = proposals[...,:4], proposals[...,4]
-    indices = tf.image.non_max_suppression(
-        boxes, scores, cfg.MAX_PROP,
-        cfg.NMS_THRESH)
-    proposals = tf.gather(boxes, indices)
-    # Pad if needed
-    padding = tf.maximum(cfg.MAX_PROP - tf.shape(proposals)[0], 0)
-    proposals = tf.pad(proposals, [(0, padding), (0, 0)])
-    return proposals
+def nms_proposals_tensor(proposal):
+   # non max suppression
+   pboxes = proposal[...,:4]
+   pconf = proposal[...,4]
+   indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
+
+   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
+
+   return proposal
+#
+## Non-max suppression
+#def nms(proposals):
+#    boxes, scores = proposals[...,:4], proposals[...,4]
+#    indices = tf.image.non_max_suppression(
+#        boxes, scores, cfg.MAX_PROP,
+#        cfg.NMS_THRESH)
+#    proposals = tf.gather(boxes, indices)
+#    # Pad if needed
+#    padding = tf.maximum(cfg.MAX_PROP - tf.shape(proposals)[0], 0)
+#    proposals = tf.pad(proposals, [(0, padding), (0, 0)])
+#    return proposals
 
 ###############################################################################################
 #################################   MASK RCNN PROCESSING   ####################################

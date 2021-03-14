@@ -7,7 +7,7 @@ Created on Mon Dec 21 18:37:18 2020
 """
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, entry_stop_gradients, check_proposals_tensor, nms_proposals_tensor, decode_prediction, nms
+from utils import decode_delta_map, xywh2xyxy, entry_stop_gradients, check_proposals_tensor, nms_proposals_tensor, decode_prediction
 from backbone import cspdarknet53_graph
 import numpy as np
 from group_norm import GroupNormalization as GroupNorm
@@ -236,8 +236,7 @@ def yolov4_plus1_proposal_graph(predictions):
     d_4 = decode_prediction(p_4, ANCHORS[2], cfg.STRIDES[2])    
     d_5 = decode_prediction(p_5, ANCHORS[3], cfg.STRIDES[3])
     proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels
-#    proposals = nms_proposals_tensor(proposals)
-    proposals = tf.map_fn(nms,proposals, fn_output_signature=tf.float32)
+    proposals = nms_proposals_tensor(proposals)
     
     # stop backpropagation for all zero boxes, this leads to nan gradient due to log decoding
     mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)

@@ -45,6 +45,7 @@ image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
 labels = [label_2, labe_3, label_4, label_5]
 #with tf.GradientTape() as tape:
 preds, proposals, pred_mask = model(image, training=training)
+class_ids = tf.argmax(proposals[...,5:],axis=-1)
 proposals = proposals[...,:4]
 target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
 alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
@@ -263,23 +264,23 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
-for i in range(1):
+for i in range(10):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 #    start = time.perf_counter()
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
+    class_ids = tf.cast(tf.argmax(proposals[...,5:],axis=-1),tf.int32)+1
     pred_mask *= 3
-    class_ids = tf.cast(proposals[...,5],tf.int32)
     pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
     indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
     pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]
-    pbox, pconf, pclass = tf.split(proposals, (4,1,1), axis=-1)
+    pbox, pconf, pclass = tf.split(proposals, (4,1,41), axis=-1)
     pclass+=1
     pconf*=10
     print(pclass)
-    proposals = tf.concat([pbox, pconf, pclass],axis=-1)
+    proposals = tf.concat([pbox, pconf, tf.cast(class_ids[...,None],tf.float32)],axis=-1)
     predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
     i+=1
