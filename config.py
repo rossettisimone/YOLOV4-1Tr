@@ -1,5 +1,5 @@
 # GPU = '0'
-GPU = '0,1'
+GPU = '0'
 
 DATASET_TYPE = 'ava'
 NET_TYPE = '3'
@@ -18,8 +18,8 @@ SHUFFLE = True
 DATA_AUGMENT = True
 LOGDIR = 'logdir'
 WEIGHTS = 'weights'
-MIN_BOX_DIM = 0.02
-MIN_BOX_RATIO = 0.2
+MIN_BOX_DIM = 0.01
+MIN_BOX_RATIO = 0.1
 
 # Input 
 BATCH = 8

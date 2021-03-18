@@ -115,7 +115,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.45--6.217.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.45--6.499.h5')
 
 model.trainable = False
 
