@@ -97,7 +97,7 @@ class Generator(object):
     def data_generator(self, video, frame_id):
         frame_name = video['f_l'][frame_id]
         v_id =  video['v_id']
-        path = os.path.join(cfg.VIDEOS_DATASET_PATH, v_id, frame_name+'.png' )
+        path = os.path.join(cfg.AVA_VIDEOS_DATASET_PATH, v_id, frame_name+'.png' )
         bboxes = []
         masks = [] 
         try:
@@ -113,7 +113,7 @@ class Generator(object):
                 box = np.array(np.r_[box,1]*np.array([width, height, width, height, p_id]), dtype = np.int32)
                 if box[2]>box[0] and box[3]>box[1]:
                     try:
-                        path_mask = os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' )
+                        path_mask = os.path.join(cfg.AVA_SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(person['p_id'])+'.png' )
                         mask = np.array(read_image(path_mask))
                         mask = mask_clamp(mask)
                         if np.any(mask[box[1]:box[3],box[0]:box[2]]):
@@ -211,11 +211,11 @@ class DataLoader(Generator):
         self.shuffle = shuffle
         self.augment = augment
         self.json_train_dataset = []
-        for file_path in cfg.TRAIN_ANNOTATION_PATH:
+        for file_path in cfg.AVA_TRAIN_ANNOTATION_PATH:
             self.json_train_dataset += file_reader(file_path)
             print('Train Dataset {} loaded'.format(file_path))
         self.json_val_dataset = []
-        for file_path in cfg.VAL_ANNOTATION_PATH:
+        for file_path in cfg.AVA_VAL_ANNOTATION_PATH:
             self.json_val_dataset += file_reader(file_path)
             print('Validation Dataset {} loaded'.format(file_path))
         max_id_in_video = {}

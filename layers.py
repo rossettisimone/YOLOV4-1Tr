@@ -7,8 +7,7 @@ Created on Mon Dec 21 18:37:18 2020
 """
 import tensorflow as tf
 import config as cfg
-from utils import decode_delta_map, xywh2xyxy, nms_proposals,\
-    entry_stop_gradients, check_proposals, check_proposals_tensor, nms_proposals_tensor, decode_prediction
+from utils import decode_delta_map, xywh2xyxy, entry_stop_gradients, check_proposals_tensor, nms_proposals_tensor, decode_prediction
 from backbone import cspdarknet53_graph
 import numpy as np
 from group_norm import GroupNormalization as GroupNorm
@@ -173,7 +172,7 @@ def yolov4_plus1_decode_graph(input_layer):
     
     n_2, n_3, n_4, n_5 = input_layer
     
-    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS #6
+    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CONF + cfg.NUM_CLASSES
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
     e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)

@@ -117,7 +117,7 @@ def yolov4_plus1_decode_graph(input_layer):
     
     n_2, n_3, n_4, n_5 = input_layer
     
-    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CLASS + cfg.NUM_CLASS
+    prediction_channels = cfg.BBOX_CONF + cfg.BBOX_REG + cfg.NUM_CLASS
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
     e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=True, bn=True)
@@ -300,8 +300,8 @@ class CustomDecode(tf.keras.layers.Layer):
         
         self.NUM_ANCHORS = cfg.NUM_ANCHORS
         self.NUM_CLASS = cfg.NUM_CLASS
-        self.BBOX_CLASS = cfg.BBOX_CLASS
         self.BBOX_REG = cfg.BBOX_REG
+        self.BBOX_CONF = cfg.BBOX_CONF
         self.MASK = cfg.MASK
         self.LEVEL = level
         self.STRIDES = tf.constant(cfg.STRIDES,dtype=tf.float32)
@@ -309,7 +309,7 @@ class CustomDecode(tf.keras.layers.Layer):
         self.STRIDE = self.STRIDES[level]
 #        self.XYSCALE = tf.constant(cfg.XYSCALE,dtype=tf.float32)
         self.filters = 2**(6+level)
-        self.bbox_filters = self.NUM_ANCHORS * (self.NUM_CLASS + self.BBOX_CLASS + self.BBOX_REG)
+        self.bbox_filters = self.NUM_ANCHORS * (self.NUM_CLASS + self.BBOX_REG + self.BBOX_CONF)
         self.ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[self.LEVELS, self.NUM_ANCHORS, 2])[level]
         self.emb_dim = cfg.EMB_DIM 
         

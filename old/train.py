@@ -26,7 +26,7 @@ else:
     print('No GPU found')
         
 from models import MSDS
-from loader import DataLoader 
+from loader_avakin import DataLoader 
 
 ds = DataLoader(shuffle=True, augment=False)
 #with mirrored_strategy.scope():
@@ -79,7 +79,7 @@ model.fit()
 #import numpy as np
 #
 #import matplotlib.pyplot as plt
-#from loader import DataLoader 
+#from loader_avakin import DataLoader 
 #
 #i = 0
 #sec = 0
@@ -117,7 +117,7 @@ model.fit()
 
 
 #%%
-from loader import DataLoader
+from loader_avakin import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs
 import matplotlib.pyplot as plt
 from utils import encode_labels
@@ -145,7 +145,7 @@ proposals = decode_labels(p)
 draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE,masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), mode= 'PIL')
 #%%
 import timeit
-from loader import DataLoader
+from loader_avakin import DataLoader
 ds = DataLoader(shuffle=True, augment=True)
 iterator = ds.train_ds.repeat().__iter__()
 print('Time: ', timeit.timeit(lambda: iterator.next(), number = 50)/50)

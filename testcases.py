@@ -39,11 +39,13 @@ def test_preprocess_mrcnn():
     proposals_1 = tf.random.uniform((2,10,2))*0.5
     proposals_2 = tf.random.uniform((2,10,2))*0.5 + 0.5
     proposals = tf.concat([proposals_1, proposals_2], axis=-1)
-    bad_proposals = tf.zeros((2,10,4))
+    bad_proposals = tf.zeros((2,40,4))
     proposals = tf.concat([proposals, bad_proposals], axis=1)
     gt_bboxes_1 = tf.random.uniform((2,5,2))*0.5
     gt_bboxes_2 = tf.random.uniform((2,5,2))*0.5 + 0.5
+    gt_class_ids = tf.round(tf.random.uniform((2,5,1),1,41))
     gt_bboxes = tf.concat([gt_bboxes_1, gt_bboxes_2], axis=-1)* cfg.TRAIN_SIZE
+    gt_bboxes = tf.concat([gt_bboxes, gt_class_ids], axis=-1)
     gt_masks = tf.round(tf.random.uniform((2,5,28,28)))
 #    proposals = tf.zeros((2,20,4))
 #    gt_bboxes = tf.zeros((2,10,4))
@@ -53,15 +55,16 @@ def test_preprocess_mrcnn():
     return target_class_ids, target_masks
 
 def test_loss_mrcnn():
-    from model import mrcnn_bbox_loss_graph,mrcnn_mask_loss_graph
+    from model import mask_loss_graph
+    import config as cfg
     target_class_ids, target_masks = test_preprocess_mrcnn()
-    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,2))
-    loss = mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks)
+    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,cfg.NUM_CLASSES))
+    loss = mask_loss_graph(target_masks, target_class_ids, pred_masks)
     
     assert tf.equal(loss, 0)
     
 def test_encode_decode():
-    from loader import DataLoader
+    from loader_avakin import DataLoader
     from utils import draw_bbox, encode_labels
     from utils import preprocess_mrcnn
     from utils import decode_target_mask
@@ -84,7 +87,7 @@ def test_encode_decode():
     
     
 def test_encode_decode_loss():
-    from loader import DataLoader
+    from loader_avakin import DataLoader
     from utils import encode_labels
     from utils import preprocess_mrcnn
     from utils import decode_labels,crop_and_resize,xyxy2xywh
@@ -109,7 +112,7 @@ def test_encode_decode_loss():
 
 def test_tf_mask_transform(NUM_TESTS=10, verbose = 0):
 
-    from loader import DataLoader
+    from loader_avakin import DataLoader
     from utils import draw_bbox
     import matplotlib.pyplot as plt
     import numpy as np

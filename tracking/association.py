@@ -95,11 +95,11 @@ class DataLoader(Generator):
         self.max_instances = 10
         self.dim_data = 6
         self.json_train_dataset = []
-        for file_path in cfg.TRAIN_ANNOTATION_PATH:
+        for file_path in cfg.AVA_TRAIN_ANNOTATION_PATH:
             self.json_train_dataset += file_reader(file_path)
             print('Train Dataset {} loaded'.format(file_path))
         self.json_val_dataset = []
-        for file_path in cfg.VAL_ANNOTATION_PATH:
+        for file_path in cfg.AVA_VAL_ANNOTATION_PATH:
             self.json_val_dataset += file_reader(file_path)
             print('Validation Dataset {} loaded'.format(file_path))
         self.annotation_train = [(video,frame_id) for video in self.json_train_dataset \

@@ -25,8 +25,8 @@ class DataLoader(object):
             yield id_list[idx]
     
     def preprocess_json_dataset(self):
-        json_train_dataset = self.read_json_list(cfg.TRAIN_ANNOTATION_PATH)
-        json_val_dataset = self.read_json_list(cfg.VAL_ANNOTATION_PATH)
+        json_train_dataset = self.read_json_list(cfg.AVA_TRAIN_ANNOTATION_PATH)
+        json_val_dataset = self.read_json_list(cfg.AVA_VAL_ANNOTATION_PATH)
         nIDs = self.count_ids(json_train_dataset)
         annotation_train = self.parse_frames(json_train_dataset)
         annotation_val = self.parse_frames(json_val_dataset)
@@ -110,7 +110,7 @@ class DataLoader(object):
     def _data_generator(self, video, frame_id):
         frame_name = video['f_l'][frame_id]
         v_id =  video['v_id']
-        path = os.path.join(cfg.VIDEOS_DATASET_PATH, v_id, frame_name+'.png' )
+        path = os.path.join(cfg.AVA_VIDEOS_DATASET_PATH, v_id, frame_name+'.png' )
         bboxes = []
         masks = [] 
         try:
@@ -125,7 +125,7 @@ class DataLoader(object):
                 box = np.array(np.r_[box,1]*np.array([width, height, width, height, p_id]), dtype = np.int32)
                 if box[2]>box[0] and box[3]>box[1]:
                     try:
-                        path_mask = os.path.join(cfg.SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(p_id)+'.png' )
+                        path_mask = os.path.join(cfg.AVA_SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(p_id)+'.png' )
                         mask = np.array(read_image(path_mask))
                         mask = mask_clamp(mask)
                         if np.any(mask[box[1]:box[3],box[0]:box[2]]):
