@@ -1,5 +1,5 @@
 # GPU = '0'
-GPU = '0'
+GPU = '0,1'
 
 DATASET_TYPE = 'ava'
 NET_TYPE = '3'
@@ -9,17 +9,17 @@ AVA_SEGMENTS_DATASET_PATH = "/home/fiorapirri/Documents/workspace/ava_kinetics_v
 AVA_TRAIN_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1_0/dataset/kinetics_100_frames_boundings_train_v1.0.json"]
 
-#AVA_VIDEOS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/frames"
-#AVA_SEGMENTS_DATASET_PATH = "/media/data4/Datasets/Kinetics_AVA/segments/"
-#AVA_TRAIN_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
-#AVA_VAL_ANNOTATION_PATH = ["/media/data4/Datasets/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
+#AVA_VIDEOS_DATASET_PATH = "/media/data3/Kinetics_AVA/frames"
+#AVA_SEGMENTS_DATASET_PATH = "/media/data3/Kinetics_AVA/segments/"
+#AVA_TRAIN_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data3/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
+#AVA_VAL_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
-YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/train.json"
-YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/JPEGImages/"
-YT_VAL_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/valid_all_frames/valid.json"
-YT_VAL_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/valid_all_frames/JPEGImages/"
-YT_TEST_ANNOTATION_PATH = "/media/data4/Datasets/YoutubeVOS19/test_all_frames/test.json"
-YT_TEST_FRAMES_PATH = "/media/data4/Datasets/YoutubeVOS19/test_all_frames/JPEGImages/"
+YT_TRAIN_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/train_all_frames/train.json"
+YT_TRAIN_FRAMES_PATH = "/media/data3/YoutubeVOS19/train_all_frames/JPEGImages/"
+YT_VAL_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/valid.json"
+YT_VAL_FRAMES_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/JPEGImages/"
+YT_TEST_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/test_all_frames/test.json"
+YT_TEST_FRAMES_PATH = "/media/data3/YoutubeVOS19/test_all_frames/JPEGImages/"
 
 SPLIT_RATIO = .1
 SHUFFLE = True
@@ -30,7 +30,7 @@ MIN_BOX_DIM = 0.01
 MIN_BOX_RATIO = 0.01
 
 # Input 
-BATCH = 6
+BATCH = 10
 TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
@@ -81,7 +81,7 @@ EPOCHS = 60
 FINE_TUNING = 2
 
 CONF_THRESH = 0.7
-NMS_THRESH = 0.6
+NMS_THRESH = 0.4
 STEPS_PER_EPOCH_TRAIN = 1000
 STEPS_PER_EPOCH_VAL = 100
 
