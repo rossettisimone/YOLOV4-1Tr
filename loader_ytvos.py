@@ -92,9 +92,11 @@ class DataLoader(object):
     def initilize_train_ds(self):
         if self.shuffle:
             np.random.shuffle(self.train_list)
+        options = tf.data.Options()
+        options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
         ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.train_list], output_types=(tf.int32))
         ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        ds = ds.filter(self.filter_inputs)
+        ds = ds.filter(self.filter_inputs).with_options(options)
         ds = ds.batch(self.batch_size, drop_remainder=True)
         ds = ds.repeat().prefetch(tf.data.experimental.AUTOTUNE)
         return ds
@@ -102,9 +104,11 @@ class DataLoader(object):
     def initilize_val_ds(self):
         if self.shuffle:
             np.random.shuffle(self.val_list)
+        options = tf.data.Options()
+        options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
         ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.val_list], output_types=(tf.int32))
         ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        ds = ds.filter(self.filter_inputs)
+        ds = ds.filter(self.filter_inputs).with_options(options)
         ds = ds.batch(self.batch_size, drop_remainder=True)
         ds = ds.take(cfg.STEPS_PER_EPOCH_VAL).repeat().prefetch(tf.data.experimental.AUTOTUNE)
         return ds
