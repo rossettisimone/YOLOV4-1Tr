@@ -14,8 +14,14 @@ AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1
 #AVA_TRAIN_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data3/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
 #AVA_VAL_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
-YT_TRAIN_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/train_all_frames/train.json"
-YT_TRAIN_FRAMES_PATH = "/media/data3/YoutubeVOS19/train_all_frames/JPEGImages/"
+#YT_TRAIN_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/train_all_frames/train.json"
+#YT_TRAIN_FRAMES_PATH = "/media/data3/YoutubeVOS19/train_all_frames/JPEGImages/"
+#YT_VAL_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/valid.json"
+#YT_VAL_FRAMES_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/JPEGImages/"
+#YT_TEST_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/test_all_frames/test.json"
+#YT_TEST_FRAMES_PATH = "/media/data3/YoutubeVOS19/test_all_frames/JPEGImages/"
+YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/train.json"
+YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/JPEGImages/"
 YT_VAL_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/valid.json"
 YT_VAL_FRAMES_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/JPEGImages/"
 YT_TEST_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/test_all_frames/test.json"
@@ -30,7 +36,7 @@ MIN_BOX_DIM = 0.01
 MIN_BOX_RATIO = 0.01
 
 # Input 
-BATCH = 10
+BATCH = 4
 TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
@@ -63,7 +69,7 @@ ANCHORS = np.array(np.array(ANCHORS)/416*TRAIN_SIZE,np.int32) # if want to test 
 
 NUM_ANCHORS = 4
 BBOX_REG = 4
-BBOX_CONF = 1
+BBOX_CONF = 2
 
 
 STRIDES = [ 4, 8, 16, 32]

@@ -284,7 +284,7 @@ for i in range(1):
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
     class_ids = tf.cast(proposals[...,5], tf.int32)
-    pred_mask *= 3
+    pred_mask *= 40
     pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
     indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
     pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]

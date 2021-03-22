@@ -424,7 +424,7 @@ def encode_labels(bboxes):
 def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     target = tf.cast(target, tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
-    ids = target[:,4]
+    ids = target[:,4]-1
     
     gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
     gt_boxes = xyxy2xywh(bbox)
@@ -432,7 +432,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     anchor_wh = tf.cast(anchor_wh, tf.float32)
     tbox = tf.zeros((nA, nGh, nGw, 4))
     tconf = tf.zeros(( nA, nGh, nGw))
-    tid = tf.zeros((nA, nGh, nGw, 1))
+    tid = tf.zeros((nA, nGh, nGw, 1))-1
     
     anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
     anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
@@ -574,15 +574,17 @@ def decode_delta_map(delta_map, anchors):
     
 def decode_prediction(prediction, anchors, stride):
     prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
-    pconf = prediction[..., 4:]  # class
+    pconf = prediction[..., 4:6]  # class
     pconf = tf.nn.softmax(pconf)[...,1:] # class
+    pclass = prediction[..., 6:]  # class
+    pclass = tf.nn.softmax(pconf) # class
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
     pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
     pbox = xywh2xyxy(pbox) # to bbox
     pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
-    proposal = tf.concat([pbox, pconf], axis=-1) 
+    proposal = tf.concat([pbox, pconf, pclass], axis=-1) 
     nB = tf.shape(proposal)[0]
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC])
@@ -610,7 +612,7 @@ def check_proposals_tensor(proposal):
     mask = tf.logical_and(mask_dim,mask_ratio)
     indices = tf.tile(tf.cast(mask, tf.float32)[...,tf.newaxis],(1,1,nC))
     proposal = tf.multiply(proposal, indices) # remove the bad proposals
-    pconf = tf.reduce_max(proposal[..., 4:],axis=-1)
+    pconf = proposal[..., 4]
     indices = tf.argsort(pconf, axis=-1, direction='DESCENDING', stable=True)
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
     proposal = nms_proposals(proposal)
@@ -643,7 +645,7 @@ def check_proposals_tensor(proposal):
 def nms_proposals(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = tf.reduce_max(proposal[..., 4:],axis=-1)
+   pconf = proposal[..., 4]
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
@@ -652,13 +654,14 @@ def nms_proposals(proposal):
 def nms_proposals_tensor(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = tf.reduce_max(proposal[..., 4:],axis=-1)
+   pconf = proposal[..., 4]
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
-   conf = tf.reduce_max(proposal[...,4:],axis=-1)
-   category = tf.cast(tf.argmax(proposal[...,4:],axis=-1),tf.float32)+1.
-   proposal = tf.concat([proposal[...,:4],conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)  
+   pbbox = proposal[...,:4]
+   pconf = proposal[...,4:5]
+   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]+1.
+   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  
    
    return proposal
 #
