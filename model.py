@@ -118,11 +118,14 @@ def compute_loss_rpn_level(label, pred):
 #    tid = tf.math.reduce_max(tid, axis=1)
 #    tid = tf.squeeze(tid[class_mask],axis=-1)
 #    pclass = tf.boolean_mask(pclass, class_mask)    
-    non_zero_entry = tf.cast(tf.greater_equal(tid,0.0),tf.float32) 
-    pclass = entry_stop_gradients(pclass, non_zero_entry) # stop gradient for regions labeled -1
-    tid = tf.cast(tf.where(tf.less(tid, 0.0), 0.0, tid),tf.int32) # replace -1 with 0
+    non_zero_entry = tf.cast(tf.greater_equal(tid,0.0),tf.float32)
+    pclass = entry_stop_gradients(pclass, non_zero_entry)
     tid = tf.squeeze(tid,axis=-1)
-    lclass = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid,logits=pclass)) # apply softmax and do non negative log likelihood loss 
+    mask = tf.greater_equal(tid,0.0)
+    tid = tf.cast(tf.where(tf.less(tid, 0.0), 0.0, tid),tf.int32)
+    lclass = tf.cond(tf.greater(tf.shape(tid[mask])[0],0), \
+                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[mask],logits=pclass[mask])),\
+                     lambda: tf.constant(0.0))
     return lbox, lconf, lclass
 
 def compute_loss_mrcnn(model, proposals, target_class_ids, target_masks, pred_masks):

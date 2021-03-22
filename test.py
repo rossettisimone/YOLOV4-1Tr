@@ -20,14 +20,14 @@ from model import get_model
 
 import tensorflow_addons as tfa
 
-#model = get_model()
-#
-##model.summary()
-#
-#optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
-#                                learning_rate = cfg.LR, momentum = cfg.MOM, \
-#                                nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
-#model.compile(optimizer)
+model = get_model()
+
+#model.summary()
+
+optimizer = tfa.optimizers.SGDW( weight_decay = cfg.WD, \
+                                learning_rate = cfg.LR, momentum = cfg.MOM, \
+                                nesterov = False, clipnorm = cfg.GRADIENT_CLIP)
+model.compile(optimizer)
 
 #from loader_avakin import DataLoader
 from utils import encode_labels, preprocess_mrcnn
@@ -123,7 +123,7 @@ for i in range(1):
         
     predictions = [label_2,label_3,label_4,label_5]
     proposals = decode_labels(predictions)
-    class_ids = proposals[...,5]
+    class_ids = proposals[...,5]+1
     draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
 
 #%%
