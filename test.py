@@ -5,7 +5,7 @@ Created on Mon Feb 15 21:08:40 2021
 
 @author: Simone Rossetti
 """    
-#%%%%%%%%%%%%%%%%%%%%%%%%%%% BUILD ENV %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% BUILD ENV %%%%%%%%%%%%%%%%%%%%%%%%%%%%§%%%%%%
 import env
 
 
@@ -84,7 +84,7 @@ import timeit
 
 from loader_ytvos import DataLoader 
 
-ds = DataLoader(shuffle=True, augment=False)
+ds = DataLoader(shuffle=True, augment=True)
 #rle_arr = ds.annotation[100]['segmentations'][0]
 #%%
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
@@ -98,13 +98,13 @@ from loader_ytvos import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize
 import matplotlib.pyplot as plt
 
-ds = DataLoader(shuffle=True, augment=False)
+ds = DataLoader(shuffle=False, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
 #%%
 from layers import yolov4_plus1_proposal_graph
 from utils import decode_labels
-for i in range(1):
+for i in range(10):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
@@ -133,7 +133,7 @@ model = get_model()
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.45--6.499.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.07--5.154.h5')
 
 model.trainable = False
 
@@ -284,12 +284,11 @@ for i in range(1):
     predictions = model.infer(image)
     preds, proposals, pred_mask = predictions
     class_ids = tf.cast(proposals[...,5], tf.int32)
-    pred_mask *= 40
+    pred_mask *= 10
     pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
     indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
     pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]
     pbox, pconf, pclass = tf.split(proposals, (4,1,1), axis=-1)
-    pconf*=20
     proposals = tf.concat([pbox, pconf, pclass],axis=-1)
     predictions = preds, proposals, pred_mask
 #    end = time.perf_counter()-start
