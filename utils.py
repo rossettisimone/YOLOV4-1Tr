@@ -744,7 +744,7 @@ def crop_and_resize(proposal_gt_bbox_gt_mask):
                                            box_indices = box_indices, crop_size=(cfg.MASK_SIZE,cfg.MASK_SIZE),method="bilinear")[...,0]
     target_mask = tf.round(target_mask)
     target_mask = tf.clip_by_value(target_mask,0.0,1.0)
-    target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(cfg.MAX_INSTANCES,cfg.MASK_SIZE,cfg.MASK_SIZE))
+    target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(cfg.MAX_PROP,cfg.MASK_SIZE,cfg.MASK_SIZE))
     return target_mask
     
 def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):
