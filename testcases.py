@@ -8,9 +8,9 @@ Created on Tue Feb 16 19:25:16 2021
 import tensorflow as tf
 
 def main():
-    test_check_proposals()
-    test_nms_proposals()
-    test_preprocess_mrcnn();
+#    test_check_proposals()
+#    test_nms_proposals()
+#    test_preprocess_mrcnn();
     test_loss_mrcnn()
     test_encode_decode()
     test_encode_decode_loss()
@@ -58,7 +58,7 @@ def test_loss_mrcnn():
     from model import mask_loss_graph
     import config as cfg
     target_class_ids, target_masks = test_preprocess_mrcnn()
-    pred_masks = tf.tile(target_masks[...,None],(1,1,1,1,cfg.NUM_CLASSES))
+    pred_masks = tf.concat([(((target_masks-1)*-2)-1)[...,None],((target_masks*2)-1)[...,None]],axis=-1)*100
     loss = mask_loss_graph(target_masks, target_class_ids, pred_masks)
     
     assert tf.equal(loss, 0)
