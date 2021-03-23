@@ -154,6 +154,9 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
     """
     # Reshape for simplicity. Merge first two dimensions into one.
     target_class_ids = tf.reshape(target_class_ids, (-1,))
+    
+    target_class_ids = tf.where(target_class_ids>0,1,0) # added to train with 1 class for mask
+    
     mask_shape = tf.shape(target_masks)
     target_masks = tf.reshape(target_masks, (-1, mask_shape[2], mask_shape[3]))
     pred_shape = tf.shape(pred_masks)
@@ -165,20 +168,27 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
     # Only positive ROIs contribute to the loss. And only
     # the class specific mask of each ROI.
     positive_ix = tf.where(target_class_ids > 0)[:, 0]
-    positive_class_ids = tf.cast(
-        tf.gather(target_class_ids, positive_ix), tf.int64)
-    positive_class_ids = positive_class_ids - 1# classes starts by 1..41 thus indices 0 to 40
-    indices = tf.stack([positive_ix, positive_class_ids], axis=1)
+#    positive_class_ids = tf.cast(
+#        tf.gather(target_class_ids, positive_ix), tf.int64)
+#    positive_class_ids = positive_class_ids - 1# classes starts by 1..41 thus indices 0 to 40
+#    indices = tf.stack([positive_ix, positive_class_ids], axis=1)
 
     # Gather the masks (predicted and true) that contribute to loss
     y_true = tf.gather(target_masks, positive_ix)
-    y_pred = tf.gather_nd(pred_masks, indices)
-
+#    y_pred = tf.gather_nd(pred_masks, indices)
+    y_pred = tf.gather(pred_masks, positive_ix)
     # Compute binary cross entropy. If no positive ROIs, then return 0.
     # shape: [batch, roi, num_classes]
+#    loss = tf.cond(tf.greater(tf.size(y_true), 0),\
+#                   lambda: tf.keras.losses.binary_crossentropy(y_true, y_pred),\
+#                   lambda: tf.constant(0.0))
+    # Permute again masks to [N, height, width, num_classes]
+    y_pred = tf.transpose(y_pred, [0, 2, 3, 1])
+    # cast to correct label type
+    y_true = tf.cast(y_true,tf.int32)
     loss = tf.cond(tf.greater(tf.size(y_true), 0),\
-                   lambda: tf.keras.losses.binary_crossentropy(y_true, y_pred),\
+                   lambda: tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred),\
                    lambda: tf.constant(0.0))
-
+    
     loss = tf.reduce_mean(loss)
     return loss

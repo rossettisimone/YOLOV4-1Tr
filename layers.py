@@ -248,11 +248,11 @@ def yolov4_plus1_proposal_graph(predictions):
 #  PANet modified MASK-RCNN mask graph
 ############################################################
 
-def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=cfg.NUM_CLASSES): # num classes + 1, 0 is background
+def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , mask_conf=cfg.MASK_CONF): # num classes + 1, 0 is background
     """Builds the computation graph of the mask head of Feature Pyramid Network.
     Params: 
         pool_size: The width of the square feature map generated from ROI Pooling.
-        num_classes: number of classes, which determines the depth of the results
+        mask_conf: number of conf channels, which determines the depth of the results
     Input:
         rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
               coordinates.
@@ -260,7 +260,7 @@ def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=cfg.NUM_C
                       [e_2, e_3, e_4, e_5]. Each has a different resolution.
         image_meta: [batch, (meta data)] Image details. See compose_image_meta()
     Output: 
-        Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
+        Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, MASK_CONF]
     """
     # rois, feature_maps = inputs[0], inputs[1]
     # ROI Pooling
@@ -308,11 +308,12 @@ def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , num_classes=cfg.NUM_C
     x_ff = tf.keras.layers.Reshape((x_ff_shape[1], x_ff_shape[2]*x_ff_shape[3]*x_ff_shape[4]))(x_ff)
     x_ff = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(pool_size*pool_size*2*2, activation='relu'), name='mrcnn_mask_fc')(x_ff)
 
-    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(num_classes, (1, 1), strides=1), name="mrcnn_mask_fcn")(x_fcn)
+    x_fcn = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(mask_conf, (1, 1), strides=1), name="mrcnn_mask_fcn")(x_fcn)
     x_ff = tf.keras.layers.Reshape((x_ff_shape[1], pool_size*2, pool_size*2, 1))(x_ff)
-    x_ff = tf.keras.layers.Lambda(lambda x: tf.tile(x, (1, 1, 1, 1, num_classes)))(x_ff)
-    x = tf.keras.layers.Add()([x_fcn, x_ff])
-    x = tf.keras.layers.Activation('sigmoid', name='mrcnn_mask')(x)
+    x_ff = tf.keras.layers.Lambda(lambda x: tf.tile(x, (1, 1, 1, 1, mask_conf)))(x_ff)
+    x = tf.concat([x_fcn, x_ff],axis=-1)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(mask_conf, (1, 1), strides=1), name="custom_out")(x)
+#    x = tf.keras.layers.Activation('softmax', name='mrcnn_mask')(x)
 
     return x
 

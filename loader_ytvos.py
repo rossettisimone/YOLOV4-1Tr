@@ -3,7 +3,7 @@ import config as cfg
 import numpy as np
 import tensorflow as tf
 from utils import file_reader, mask_clamp, read_image,\
-        data_augment, data_preprocess, data_pad, data_check, xywh2xyxy
+        data_augment, data_preprocess, data_pad, data_check, xywh2xyxy,random_brightness
 np.random.seed(41296)
     
 class DataLoader(object):
@@ -13,7 +13,7 @@ class DataLoader(object):
         self.shuffle = shuffle
         self.augment = augment
         self.annotation, self.annotation_list, self.dict_classes, self.nIDs = self.preprocess_json_dataset()
-        self.train_list, self.val_list = DataLoader.split_dataset(len(self.annotation_list))
+        self.train_list, self.val_list = self.split_dataset()
         self.train_ds = self.initilize_train_ds()
         self.val_ds = self.initilize_val_ds()
         print('Dataset loaded.')
@@ -52,6 +52,7 @@ class DataLoader(object):
             annotations = [notes for notes in json_dataset['annotations'] if notes['video_id'] == video_id]
             for i in range(video['length']):
                 new_note = dict()
+                new_note['video_id'] = video_id
                 new_note['width'] = video['width']
                 new_note['height'] = video['height']
                 new_note['frame_num'] = i
@@ -60,12 +61,14 @@ class DataLoader(object):
                 new_note['bboxes'] = []
                 new_note['areas'] = []
                 new_note['category_id'] = []
+                new_note['ids'] = []
                 for notes in annotations:                    
-                    if notes['iscrowd'] == 0 and notes['bboxes'][i] != None and notes['areas'][i] != None and notes['segmentations'][i] != None:
+                    if notes['bboxes'][i] != None and notes['areas'][i] != None and notes['segmentations'][i] != None:
                         new_note['segmentations'].append(notes['segmentations'][i]['counts'].copy())
                         new_note['bboxes'].append(notes['bboxes'][i].copy())
                         new_note['areas'].append(notes['areas'][i])
                         new_note['category_id'].append(notes['category_id'])
+                        new_note['ids'].append(notes['id'])
                 if len(new_note['segmentations'])>0:
                     parsed_dataset.append(new_note)
         return parsed_dataset
@@ -73,7 +76,7 @@ class DataLoader(object):
         
     def filter_inputs(self, image, gt_masks, gt_bboxes):
         return tf.greater(tf.reduce_sum(gt_bboxes[...,:4]), 0) and tf.greater(tf.reduce_sum(gt_masks), 0)
-
+    
     def read_transform_train(self, idx):
         image, masks, bboxes = tf.py_function(self._single_input_generator_train, [idx], [tf.float32, tf.float32, tf.float32])
         return image, masks, bboxes
@@ -82,12 +85,11 @@ class DataLoader(object):
         image, masks, bboxes = tf.py_function(self._single_input_generator_val, [idx], [tf.float32, tf.float32, tf.float32])
         return image, masks, bboxes
     
-    @classmethod
-    def split_dataset(cls, ds_size):
-        total_list = np.arange(ds_size)
-        np.random.shuffle(total_list)
-        divider =round(ds_size*cfg.SPLIT_RATIO)
-        return total_list[:divider], total_list[divider:]
+    def split_dataset(self):
+        if self.shuffle:
+            np.random.shuffle(self.annotation_list)
+        divider =round(len(self.annotation_list)*cfg.SPLIT_RATIO)
+        return self.annotation_list[:divider], self.annotation_list[divider:]
 
     def initilize_train_ds(self):
         if self.shuffle:
@@ -117,10 +119,12 @@ class DataLoader(object):
         image, masks, bboxes, good_sample = self._data_generator(index)
         if good_sample:
             if self.augment:
+                image = random_brightness(image)
                 image, masks, bboxes = data_augment(image, masks, bboxes)
             image, masks, bboxes = data_preprocess(image, bboxes, masks)
             masks, bboxes = data_check(masks, bboxes)
             masks, bboxes = data_pad(masks, bboxes)
+                
         return image, masks, bboxes
     
     def _single_input_generator_val(self, index):    
@@ -132,10 +136,10 @@ class DataLoader(object):
         return image, masks, bboxes
     
     def rle_decoding(self, rle_arr, w, h):
-        indices = []
         rle_arr = np.cumsum(rle_arr)
-        for start, end in zip(rle_arr[0::2], rle_arr[1::2]):
-             indices.extend(list(range(start, end)))
+        indices = []
+        extend = indices.extend
+        list(map(extend, map(lambda s,e: range(s, e), rle_arr[0::2], rle_arr[1::2])));
         mask = np.zeros(h*w, dtype=np.uint8)
         mask[indices] = 1
         return mask.reshape((w, h)).T
@@ -145,7 +149,7 @@ class DataLoader(object):
     # def binary_mask_to_rle(binary_mask):
     #     rle = {'counts': [], 'size': list(binary_mask.shape)}
     #     counts = rle.get('counts')
-    #     for i, (value, elements) in enumerate(groupby(binary_mask.ravel(order='F'))):
+    #     for i, (value, elements) in enumerate(groupby(binazip(rle_arr[0::2], rle_arr[1::2])ry_mask.ravel(order='F'))):
     #         if i == 0 and value == 1:
     #             counts.append(0)
     #         counts.append(len(list(elements)))
@@ -160,14 +164,15 @@ class DataLoader(object):
         boxes = sample['bboxes']
 #        areas = sample['areas']
         file_name = sample['file_names']
+        ids = sample['ids']
         path = os.path.join(cfg.YT_TRAIN_FRAMES_PATH, file_name)
         bboxes = []
         masks = [] 
         try:
             image = np.array(read_image(path))
-            for segmentation, bbox, category_id in zip(segmentations, boxes, category_ids):
+            for segmentation, bbox, category_id, instance_id in zip(segmentations, boxes, category_ids, ids):
                 bbox = np.array(bbox)
-                bbox = np.array(np.r_[bbox[:2],bbox[:2]+bbox[2:4],category_id], dtype = np.int32)
+                bbox = np.array(np.r_[bbox[:2],bbox[:2]+bbox[2:4],category_id,instance_id], dtype = np.int32)
                 if bbox[2]>bbox[0] and bbox[3]>bbox[1]:
                     try:
                         mask = self.rle_decoding(segmentation, width, height)
@@ -181,7 +186,7 @@ class DataLoader(object):
             good_sample = True
         except: # image not found or no valid bboxes or not valid masks, use light tipe to speed up
             image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
-            bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.uint8) # bbox + pid
+            bboxes = np.zeros((cfg.MAX_INSTANCES,6), dtype=np.uint8) # bbox + pid
             masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.uint8)
             good_sample = False
         return image, masks, bboxes, good_sample
