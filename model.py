@@ -189,9 +189,7 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
     # cast to correct label type
     y_true = tf.cast(y_true,tf.int32)
     y_true = tf.stop_gradient(y_true)
-    print(y_true.shape)
-    print(y_pred.shape)
-    
+
     loss = tf.cond(tf.greater(tf.size(y_true), 0),\
                    lambda: tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred),\
                    lambda: tf.constant(0.0))
