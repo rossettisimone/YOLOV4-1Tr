@@ -424,7 +424,7 @@ def encode_labels(bboxes):
 def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     target = tf.cast(target, tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
-    ids = target[:,4]-1.
+    ids = target[:,4]-1. # from 0 to num_class-1
     
     gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
     gt_boxes = xyxy2xywh(bbox)
@@ -461,10 +461,6 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
     
     tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, 1)), tid)
-    
-#    indices = tf.cast(tid-1.0,tf.int32)[...,0] # -1 because we pass from id to indices 
-    
-#    category_id_one_hot = tf.one_hot(indices, depth = nC, on_value=1.0, off_value=0.0,axis=-1)
     
     fg_anchor_list = anchor_mesh[fg_index] 
     delta_target = encode_delta(gt_box_list, fg_anchor_list)
