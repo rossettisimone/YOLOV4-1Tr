@@ -98,7 +98,7 @@ from loader_ytvos import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize
 import matplotlib.pyplot as plt
 
-ds = DataLoader(shuffle=False, augment=False)
+ds = DataLoader(shuffle=True, augment=True)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
 #%%
@@ -110,8 +110,9 @@ for i in range(10):
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
-    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = gt_bboxes[0,...,4].numpy(), mode= 'PIL')
-
+    im = draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = gt_bboxes[0,...,4].numpy(), mode= 'return')
+    plt.imshow(im)
+    plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_3[0],axis=0),axis=-1))
@@ -120,12 +121,12 @@ for i in range(10):
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
-        
     predictions = [label_2,label_3,label_4,label_5]
     proposals = decode_labels(predictions)
     class_ids = proposals[...,5]+1
-    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
-
+    im = draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'return')
+    plt.imshow(im)
+    plt.show()
 #%%
 from model import get_model
 

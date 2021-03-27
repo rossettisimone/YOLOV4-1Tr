@@ -5,7 +5,7 @@ import tensorflow as tf
 from utils import file_reader, mask_clamp, read_image,\
         data_augment, data_preprocess, data_pad, data_check, xywh2xyxy,random_brightness
 np.random.seed(41296)
-    
+from PIL import Image
 class DataLoader(object):
     def __init__(self, batch_size = cfg.BATCH, shuffle=cfg.SHUFFLE, augment=cfg.DATA_AUGMENT):
         print('Dataset loading..')
@@ -96,11 +96,11 @@ class DataLoader(object):
             np.random.shuffle(self.train_list)
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
-        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.train_list], output_types=(tf.int32))
+        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.train_list], output_types=(tf.int32)).repeat()
         ds = ds.map(self.read_transform_train, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs).with_options(options)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
         return ds
     
     def initilize_val_ds(self):
@@ -108,18 +108,17 @@ class DataLoader(object):
             np.random.shuffle(self.val_list)
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
-        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.val_list], output_types=(tf.int32))
+        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.val_list], output_types=(tf.int32)).repeat()
         ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs).with_options(options)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.take(cfg.STEPS_PER_EPOCH_VAL).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        ds = ds.take(cfg.STEPS_PER_EPOCH_VAL).prefetch(tf.data.experimental.AUTOTUNE)
         return ds
     
     def _single_input_generator_train(self, index):
         image, masks, bboxes, good_sample = self._data_generator(index)
         if good_sample:
             if self.augment:
-                image = random_brightness(image)
                 image, masks, bboxes = data_augment(image, masks, bboxes)
             image, masks, bboxes = data_preprocess(image, bboxes, masks)
             masks, bboxes = data_check(masks, bboxes)
@@ -169,13 +168,13 @@ class DataLoader(object):
         bboxes = []
         masks = [] 
         try:
-            image = np.array(read_image(path))
+            image = np.array(read_image(path).resize((width//2,height//2)))
             for segmentation, bbox, category_id, instance_id in zip(segmentations, boxes, category_ids, ids):
                 bbox = np.array(bbox)
-                bbox = np.array(np.r_[bbox[:2],bbox[:2]+bbox[2:4],category_id,instance_id], dtype = np.int32)
+                bbox = np.array(np.r_[bbox[:2]//2,(bbox[:2]+bbox[2:4])//2,category_id,instance_id], dtype = np.int32)
                 if bbox[2]>bbox[0] and bbox[3]>bbox[1]:
                     try:
-                        mask = self.rle_decoding(segmentation, width, height)
+                        mask = np.array(Image.fromarray(self.rle_decoding(segmentation, width, height)).resize((width//2,height//2)))
                         if np.any(mask[bbox[1]:bbox[3],bbox[0]:bbox[2]]):
                             bboxes.append(bbox)
                             masks.append(mask)
