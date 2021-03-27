@@ -130,7 +130,7 @@ def random_horizontal_flip( image, masks, bboxes):
     return image, masks, bboxes
 
 def random_crop( image, masks, bboxes):
-    if np.random.random() < 0.5:
+    if np.random.random() < 0.2:
         h, w, _ = image.shape
         max_bbox = np.concatenate(
             [
@@ -406,14 +406,14 @@ def xywh2xyxy(xywh):
 
 def encode_labels(bboxes):
     ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=np.int32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
-    label_2 = encode_label(bboxes, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_CLASSES)
-    label_3 = encode_label(bboxes, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_CLASSES)
-    label_4 = encode_label(bboxes, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_CLASSES)
-    label_5 = encode_label(bboxes, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_CLASSES)
+    label_2 = encode_label(bboxes, ANCHORS[0]/cfg.STRIDES[0], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_CLASSES, cfg.TOLERANCE[0])
+    label_3 = encode_label(bboxes, ANCHORS[1]/cfg.STRIDES[1], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_CLASSES, cfg.TOLERANCE[1])
+    label_4 = encode_label(bboxes, ANCHORS[2]/cfg.STRIDES[2], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_CLASSES, cfg.TOLERANCE[2])
+    label_5 = encode_label(bboxes, ANCHORS[3]/cfg.STRIDES[3], cfg.NUM_ANCHORS, cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_CLASSES, cfg.TOLERANCE[3])
     return label_2, label_3, label_4, label_5
 
 # original labeling code, no mask is provided
-def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
+def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     target = tf.cast(target, tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
     # encode from 0 to num_class-1
@@ -437,9 +437,9 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
     
-    id_index = iou_map > cfg.ID_THRESH
-    fg_index = iou_map > cfg.FG_THRESH                                                    
-    bg_index = iou_map < cfg.BG_THRESH 
+    id_index = iou_map > cfg.ID_THRESH * tol
+    fg_index = iou_map > cfg.FG_THRESH * tol                                              
+    bg_index = iou_map < cfg.BG_THRESH * tol
     ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
                         * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
     tconf = tf.where(fg_index, 1.0, tconf)

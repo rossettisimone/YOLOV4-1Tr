@@ -98,7 +98,7 @@ from loader_ytvos import DataLoader
 from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize,decode_ground_truth
 import matplotlib.pyplot as plt
 
-ds = DataLoader(shuffle=False, augment=False)
+ds = DataLoader(shuffle=True, augment=True)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
 #%%
@@ -121,7 +121,6 @@ for i in range(1):
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
-        
     predictions = [label_2,label_3,label_4,label_5]
     proposals = decode_labels(predictions)
     class_ids = proposals[...,5]+1
