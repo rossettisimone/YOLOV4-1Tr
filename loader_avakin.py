@@ -16,6 +16,7 @@ class DataLoader(object):
             self.train_list, self.val_list, self.nIDs = self.preprocess_json_dataset()
         self.train_ds = self.initilize_train_ds()
         self.val_ds = self.initilize_val_ds()
+        self.class_dict = cfg.CLASS_YTVIS19
         print('Dataset loaded.')
         print('# identities:',self.nIDs)
 

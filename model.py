@@ -112,21 +112,29 @@ def compute_loss_rpn_level(label, pred):
     # regression loss
     # stop gradient for regions labeled -1 or 0 below CONF threshold
     positive_entry = tf.tile(tf.cast(tf.greater(tconf,0.0)[...,tf.newaxis], tf.float32),(1,1,1,1,4))
+    positive_entry = tf.stop_gradient(positive_entry)
+    tbox = tf.stop_gradient(tbox)
     lbox = tf.cond(tf.greater(tf.reduce_sum(positive_entry),0.0), lambda: \
-                   tf.reduce_mean(smooth_l1_loss(y_true = tbox * positive_entry ,y_pred = pbox * positive_entry)), lambda: tf.constant(0.0))
+                   tf.reduce_mean(smooth_l1_loss(y_true = tbox * positive_entry ,y_pred = pbox * positive_entry)), \
+                   lambda: tf.constant(0.0))
     # conf loss
     # stop gradient for regions labeled -1 below CONF threshold
     non_negative_entry = tf.greater_equal(tconf,0.0)
     pconf = entry_stop_gradients(pconf, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32)) 
     tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.int32)
+    non_negative_entry = tf.stop_gradient(non_negative_entry)
+    tconf = tf.stop_gradient(tconf)
     lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
     # classification loss
     # stop gradient for regions labeled -1 below CONF threshold
     non_negative_entry = tf.greater_equal(tid,0.0)
     pclass = entry_stop_gradients(pclass, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32))
     tid = tf.cast(tf.where(non_negative_entry, tid, 0.0),tf.int32)
-    lclass = tf.cond(tf.greater(tf.shape(tid[non_negative_entry])[0],0), \
-                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[non_negative_entry],logits=pclass[non_negative_entry])),\
+    non_negative_entry = tf.stop_gradient(non_negative_entry)
+    tid = tf.stop_gradient(tid)
+    lclass = tf.cond(tf.greater(tf.size(tid[non_negative_entry]),0), \
+                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[non_negative_entry], \
+                                                                                       logits=pclass[non_negative_entry])), \
                      lambda: tf.constant(0.0))
     return lbox, lconf, lclass
 

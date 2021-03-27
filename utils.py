@@ -117,7 +117,9 @@ def data_augment( image, masks, bboxes):
 def random_brightness(image):
     if np.random.random() < 0.5:
         image_hsv = rgb2hsv(image)
-        image_hsv[:,:,2]*=np.random.random()
+        scale = np.minimum(np.min(image_hsv[:,:,2]), 1.0-np.max(image_hsv[:,:,2]))
+        sign = 1 if np.random.random() < 0.5 else -1
+        image_hsv[:,:,2]+= sign*np.random.random()*scale
         image = np.round(hsv2rgb(image_hsv)*255).astype(np.uint8)
     return image
 
@@ -130,7 +132,7 @@ def random_horizontal_flip( image, masks, bboxes):
     return image, masks, bboxes
 
 def random_crop( image, masks, bboxes):
-    if np.random.random() < 0.2:
+    if np.random.random() < 0.5:
         h, w, _ = image.shape
         max_bbox = np.concatenate(
             [
@@ -414,13 +416,16 @@ def encode_labels(bboxes):
 
 # original labeling code, no mask is provided
 def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
+    # remove zero pad
+    non_zero_entry = tf.where(tf.logical_not(tf.reduce_all(tf.equal(target,0.0),axis=-1)))[...,0]
+    target = tf.gather(target, non_zero_entry,axis=0)
     target = tf.cast(target, tf.float32)
-    bbox = target[:,:4]/cfg.TRAIN_SIZE
+    gt_boxes = target[:,:4]/cfg.TRAIN_SIZE
     # encode from 0 to num_class-1
-    ids = tf.math.subtract(target[:,4],1.)
+    ids = tf.math.subtract(target[:,4],1.0)
     
-    gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
-    gt_boxes = xyxy2xywh(bbox)
+    gt_boxes = tf.clip_by_value(gt_boxes, 0.0, 1.0)
+    gt_boxes = xyxy2xywh(gt_boxes)
     gt_boxes = gt_boxes * tf.cast([nGw, nGh, nGw, nGh], tf.float32)
     anchor_wh = tf.cast(anchor_wh, tf.float32)
     tbox = tf.zeros((nA, nGh, nGw, 4))
@@ -434,6 +439,9 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
     max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
     
+#    inter = tf.linalg.band_part(bbox_iou(gt_boxes, gt_boxes)-tf.eye(num_rows=tf.shape(gt_boxes)[0]), -1, 0)
+#    print(tf.where(tf.greater(inter,0.0)))
+     
     iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
     
@@ -450,10 +458,17 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     gt_index = tf.boolean_mask(gt_index_map,fg_index)
     gt_box_list = tf.gather(gt_boxes,gt_index)
     gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
-
+    
+#    import matplotlib.pyplot as plt 
+#    for p,m in zip(gt_index_map, id_index):
+#        plt.imshow(tf.where(m,p+1,0))
+#        plt.show()
+    
     cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
     
     tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, 1)), tid)
+    tid = tf.where(ign_index[...,None],-1.0, tid)
+    
     fg_anchor_list = anchor_mesh[fg_index] 
     delta_target = encode_delta(gt_box_list, fg_anchor_list)
     tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)

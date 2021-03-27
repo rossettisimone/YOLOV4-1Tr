@@ -1,5 +1,5 @@
-# GPU = '0'
-GPU = '0,1,2,3'
+GPU = '0'
+#GPU = '0,1,2,3'
 
 DATASET_TYPE = 'vis'
 NET_TYPE = '3'
@@ -14,12 +14,12 @@ AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1
 #AVA_TRAIN_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data3/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
 #AVA_VAL_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
 
-YT_TRAIN_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/train_all_frames/train.json"
-YT_TRAIN_FRAMES_PATH = "/media/data3/YoutubeVOS19/train_all_frames/JPEGImages/"
-YT_VAL_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/valid.json"
-YT_VAL_FRAMES_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/JPEGImages/"
-YT_TEST_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/test_all_frames/test.json"
-YT_TEST_FRAMES_PATH = "/media/data3/YoutubeVOS19/test_all_frames/JPEGImages/"
+YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/train_all_frames/train.json"
+YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/train_all_frames/JPEGImages/"
+YT_VAL_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/valid_all_frames/valid.json"
+YT_VAL_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/valid_all_frames/JPEGImages/"
+YT_TEST_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/test_all_frames/test.json"
+YT_TEST_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/test_all_frames/JPEGImages/"
 # YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/train.json"
 # YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/JPEGImages/"
 # YT_VAL_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/valid.json"
@@ -36,7 +36,7 @@ MIN_BOX_DIM = 5e-3
 MIN_BOX_RATIO = 1e-2
 
 # Input 
-BATCH = 8
+BATCH = 1
 TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
@@ -48,7 +48,7 @@ TOLERANCE = [0.4, 0.6, 0.8, 1.0]
 
 IOU_THRESH = 0.5
 # Network
-NUM_CLASSES = 40
+NUM_CLASSES = 41
 
 ANCHORS = [2,2, 4,7, 6,14, 8,3, 
            20,15, 22,41, 25,24, 34,48, 
@@ -87,13 +87,8 @@ GRADIENT_CLIP = 5.0
 EPOCHS = 60
 FINE_TUNING = 2
 
-<<<<<<< HEAD
-CONF_THRESH = 0.5
-NMS_THRESH = 0.5
-=======
 CONF_THRESH = 0.7
-NMS_THRESH = 0.3
->>>>>>> ca2ae19297fa43ab5d4252b001f5e3d461bc3f34
+NMS_THRESH = 0.4
 STEPS_PER_EPOCH_TRAIN = 1000
 STEPS_PER_EPOCH_VAL = 100
 
@@ -108,3 +103,44 @@ POOL_SIZE = 7
 MASK_POOL_SIZE = POOL_SIZE*2
 MASK_SIZE = MASK_POOL_SIZE*2 #28
 MASK_CONF = 2
+
+CLASS_YTVIS19 = {1: 'person',
+ 2: 'giant_panda',
+ 3: 'lizard',
+ 4: 'parrot',
+ 5: 'skateboard',
+ 6: 'sedan',
+ 7: 'ape',
+ 8: 'dog',
+ 9: 'snake',
+ 10: 'monkey',
+ 11: 'hand',
+ 12: 'rabbit',
+ 13: 'duck',
+ 14: 'cat',
+ 15: 'cow',
+ 16: 'fish',
+ 17: 'train',
+ 18: 'horse',
+ 19: 'turtle',
+ 20: 'bear',
+ 21: 'motorbike',
+ 22: 'giraffe',
+ 23: 'leopard',
+ 24: 'fox',
+ 25: 'deer',
+ 26: 'owl',
+ 27: 'surfboard',
+ 28: 'airplane',
+ 29: 'truck',
+ 30: 'zebra',
+ 31: 'tiger',
+ 32: 'elephant',
+ 33: 'snowboard',
+ 34: 'boat',
+ 35: 'shark',
+ 36: 'mouse',
+ 37: 'frog',
+ 38: 'eagle',
+ 39: 'earless_seal',
+ 40: 'tennis_racket'}

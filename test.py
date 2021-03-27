@@ -108,11 +108,10 @@ for i in range(1):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
-    data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
+#    data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
     gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
     draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
-
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_3[0],axis=0),axis=-1))
@@ -121,11 +120,10 @@ for i in range(1):
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
-    predictions = [label_2,label_3,label_4,label_5]
-    proposals = decode_labels(predictions)
-    class_ids = proposals[...,5]+1
-    gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
-    draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
+#    predictions = [label_2,label_3,label_4,label_5]
+#    proposals = decode_labels(predictions)
+#    gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
+#    draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
 
 #%%
 from model import get_model
