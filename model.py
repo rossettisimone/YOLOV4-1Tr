@@ -31,7 +31,7 @@ class Model(tf.keras.Model):
         return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss," class_loss": class_loss,  \
                 "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_d":self.s_d, "s_m":self.s_m }
     
-def get_model(pretrained_backbone=True):
+def get_model(pretrained_backbone=True, infer=False):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
     backbone = cspdarknet53_graph(input_layer) # may try a smaller backbone? backbone = cspdarknet53_tiny(input_layer)
     neck = yolov4_plus1_graph(backbone)
@@ -40,14 +40,23 @@ def get_model(pretrained_backbone=True):
     pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_embeddings])
     mrcnn_mask = mask_graph_AFP(pooled_rois_mask)
     #backbone, neck,pooled_rois_classifier, pooled_rois_mask,
-    model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_mask])
-    model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
-    model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
-    model.s_d = tf.Variable(initial_value=0.0, trainable=True, name = 's_d')
-    model.s_m = tf.Variable(initial_value=0.0, trainable=True, name = 's_m')
-    if pretrained_backbone:
-        load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
-        freeze_backbone(model)
+    if infer:
+        box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
+        box = tf.round(box*cfg.TRAIN_SIZE)
+        mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+        model = Model(inputs=input_layer, outputs=[box, conf, class_id, mask])
+    else:
+        model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_mask])
+        if pretrained_backbone:
+            load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
+            freeze_backbone(model)
+        model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
+        model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
+        model.s_d = tf.Variable(initial_value=0.0, trainable=True, name = 's_d')
+        model.s_m = tf.Variable(initial_value=0.0, trainable=True, name = 's_m')
+        if pretrained_backbone:
+            load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
+            freeze_backbone(model)
     return model
 
 def train_step(model, data, optimizer):
@@ -99,32 +108,25 @@ def compute_loss_rpn(model, labels, preds):
 
 def compute_loss_rpn_level(label, pred):
     pbox, pconf, pclass = pred[..., :4], pred[..., 4:6], pred[..., 6:]
-    tbox, tconf, tid = label[...,:4], label[...,4:5], label[..., 5:6]
-    mask = tf.cast(tf.greater(tconf,0.0), tf.float32)
-#    class_mask = tf.cast(tf.math.reduce_max(mask, axis=1), tf.bool)
-    mask = tf.tile(mask,(1,1,1,1,4))
-    lbox = tf.cond(tf.greater(tf.reduce_sum(mask),0.0), lambda: \
-                   tf.reduce_mean(smooth_l1_loss(y_true = tbox * mask,y_pred = pbox * mask)), lambda: tf.constant(0.0))
-#    labels_one_hot = tf.one_hot(labels, n_classes)
-#    loss = tf.nn.softmax_cross_entropy_with_logits(
-#          labels=labels_one_hot,
-#          logits=logits)
-#    pclass = entry_stop_gradients(pclass, tf.cast(tf.greater(tconf,0.0),tf.float32))
-    non_negative_entry = tf.cast(tf.greater_equal(tconf,0.0),tf.float32)
-    pconf = entry_stop_gradients(pconf, non_negative_entry) # stop gradient for regions labeled -1 below CONF threshold, look dataloader
-    tconf = tf.cast(tf.where(tf.less(tconf, 0.0), 0.0, tconf),tf.int32)
-    tconf = tf.squeeze(tconf,axis=-1)
-    lconf =  tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
-#    tid = tf.math.reduce_max(tid, axis=1)
-#    tid = tf.squeeze(tid[class_mask],axis=-1)
-#    pclass = tf.boolean_mask(pclass, class_mask)    
-    non_zero_entry = tf.cast(tf.greater_equal(tid,0.0),tf.float32)
-    pclass = entry_stop_gradients(pclass, non_zero_entry)
-    tid = tf.squeeze(tid,axis=-1)
-    mask = tf.greater_equal(tid,0.0)
-    tid = tf.cast(tf.where(tf.less(tid, 0.0), 0.0, tid),tf.int32)
-    lclass = tf.cond(tf.greater(tf.shape(tid[mask])[0],0), \
-                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[mask],logits=pclass[mask])),\
+    tbox, tconf, tid = label[...,:4], label[...,4], label[..., 5]
+    # regression loss
+    # stop gradient for regions labeled -1 or 0 below CONF threshold
+    positive_entry = tf.tile(tf.cast(tf.greater(tconf,0.0)[...,tf.newaxis], tf.float32),(1,1,1,1,4))
+    lbox = tf.cond(tf.greater(tf.reduce_sum(positive_entry),0.0), lambda: \
+                   tf.reduce_mean(smooth_l1_loss(y_true = tbox * positive_entry ,y_pred = pbox * positive_entry)), lambda: tf.constant(0.0))
+    # conf loss
+    # stop gradient for regions labeled -1 below CONF threshold
+    non_negative_entry = tf.greater_equal(tconf,0.0)
+    pconf = entry_stop_gradients(pconf, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32)) 
+    tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.int32)
+    lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
+    # classification loss
+    # stop gradient for regions labeled -1 below CONF threshold
+    non_negative_entry = tf.greater_equal(tid,0.0)
+    pclass = entry_stop_gradients(pclass, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32))
+    tid = tf.cast(tf.where(non_negative_entry, tid, 0.0),tf.int32)
+    lclass = tf.cond(tf.greater(tf.shape(tid[non_negative_entry])[0],0), \
+                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[non_negative_entry],logits=pclass[non_negative_entry])),\
                      lambda: tf.constant(0.0))
     return lbox, lconf, lclass
 

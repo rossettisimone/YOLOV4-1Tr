@@ -15,7 +15,7 @@ from compute_ap import compute_ap_range
 import skimage.transform
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor
-
+from skimage.color import hsv2rgb, rgb2hsv
 ###############################################################################################
 ####################################   PREPROCESSING   ########################################
 ###############################################################################################
@@ -78,7 +78,6 @@ def data_check( masks, bboxes):#check consistency of bbox after data augmentatio
 
 def data_pad( masks, bboxes):
     bboxes_padded = np.zeros(( cfg.MAX_INSTANCES,bboxes.shape[1]))
-#    bboxes_padded[:,4]=-1
     masks_padded = np.zeros(( cfg.MAX_INSTANCES,masks.shape[1],masks.shape[2]))
     min_bbox = min(bboxes.shape[0],  cfg.MAX_INSTANCES)
     bboxes_padded[:min_bbox,...]=bboxes[:min_bbox,...]
@@ -104,12 +103,12 @@ def data_preprocess( image, gt_boxes, masks):
         mask = Image.fromarray(maskk)
         mask_resized = np.round(mask.resize((nw, nh),Image.ANTIALIAS))
         masks_padded[i, dh:nh+dh, dw:nw+dw] = mask_resized
-    gt_boxes = np.array(gt_boxes,dtype=np.uint32)
-    gt_boxes = np.clip(gt_boxes,0,cfg.TRAIN_SIZE-1)
+    gt_boxes[:,:4] = np.clip(gt_boxes[:,:4],0,cfg.TRAIN_SIZE-1)
+    gt_boxes = gt_boxes.astype(np.uint64)
     return image_paded, masks_padded, gt_boxes
 
 def data_augment( image, masks, bboxes):
-#    image = random_brightness(image)
+    image = random_brightness(image)
     image, masks, bboxes = random_horizontal_flip(image, masks, bboxes)
     image, masks, bboxes = random_crop(image, masks, bboxes)
     image, masks, bboxes = random_translate(image, masks, bboxes)
@@ -117,9 +116,9 @@ def data_augment( image, masks, bboxes):
     
 def random_brightness(image):
     if np.random.random() < 0.5:
-        image_hsv = np.array(tf.image.rgb_to_hsv(image/255))
-        image_hsv[:,:,-1]*=np.random.random()
-        image = np.array(tf.image.hsv_to_rgb(image_hsv)*255,dtype=np.uint8)
+        image_hsv = rgb2hsv(image)
+        image_hsv[:,:,2]*=np.random.random()
+        image = np.round(hsv2rgb(image_hsv)*255).astype(np.uint8)
     return image
 
 def random_horizontal_flip( image, masks, bboxes):
@@ -181,7 +180,7 @@ def random_translate( image, masks, bboxes):
         ty = int(np.random.uniform(-(max_u_trans - 1), (max_d_trans - 1)))
         old_image = np.copy(image)
         old_masks = np.copy(masks)
-        image = np.ones_like(image)*128
+        image = np.full(shape=[h, w, 3], fill_value=128).astype(np.uint8)
         masks = np.zeros_like(masks)
         image[max(0,ty):min(h,h+ty),max(0,tx):min(w,w+tx),:] = old_image[max(0,-ty):min(h,h-ty),max(0,-tx):min(w,w-tx),:]
         masks[:,max(0,ty):min(h,h+ty),max(0,tx):min(w,w+tx)] = old_masks[:,max(0,-ty):min(h,h-ty),max(0,-tx):min(w,w-tx)]
@@ -194,6 +193,12 @@ def random_translate( image, masks, bboxes):
 ####################################   OUTPUT DECODING   ######################################
 ###############################################################################################
 
+COLORS = []
+for name, code in ImageColor.colormap.items():
+     COLORS.append(name)
+np.random.shuffle(COLORS)
+
+     
 def decode_proposal(proposal, mode='cut'):
     bbox = proposal[...,:4]
     bbox = tf.clip_by_value(bbox,0.0,1.0)
@@ -205,22 +210,13 @@ def decode_proposal(proposal, mode='cut'):
     else:
         return bbox, conf
 
-def decode_mask(proposal, mask_mrcnn, mode='keep'):
-    conf = proposal[...,4].numpy()
-    class_id = proposal[...,5]
-    bbox = proposal[...,:4]
-    bbox = tf.round(bbox*cfg.TRAIN_SIZE).numpy()
-    mask_mrcnn = mask_mrcnn[...,0]
-    mask_mrcnn = tf.transpose(mask_mrcnn,(1,2,0)).numpy()
-    proposal = tf.round(proposal*cfg.TRAIN_SIZE).numpy()
+def decode_mask(box, conf, class_id, mask, mode='keep'):
+    box, conf, class_id, mask = box.numpy(), conf.numpy(), class_id.numpy(), mask.numpy()
     if mode == 'cut':
-        mask = conf>cfg.CONF_THRESH
-        pred_class_id = tf.cast(conf[mask]>0, tf.int32).numpy()
-        return bbox[mask], pred_class_id, class_id[mask], mask_mrcnn[...,mask]
+        cut = (conf>cfg.CONF_THRESH)
+        return box[cut], conf[cut], class_id[cut], mask[cut]
     else:
-        pred_class_id = tf.cast(conf>cfg.CONF_THRESH, tf.int32).numpy()
-        return bbox, pred_class_id, conf, mask_mrcnn
-    
+        return box, conf, class_id, mask
 
 def decode_target_mask(proposal, target_masks, mode='keep'):
     bbox = proposal[...,:4]
@@ -234,83 +230,71 @@ def decode_target_mask(proposal, target_masks, mode='keep'):
     else:
         return bbox, conf, mask_mrcnn
     
-def decode_ground_truth(gt_bboxes, gt_masks):
+def decode_ground_truth(gt_masks, gt_bboxes):
+    gt_class_id = tf.cast(gt_bboxes[...,4],tf.int32).numpy()
     gt_bbox = gt_bboxes[...,:4]
-    gt_class_id = tf.cast(tf.reduce_sum(gt_bbox,axis=-1)>0,tf.int32)
-    valid_gt = tf.math.maximum(1,tf.reduce_sum(gt_class_id))
-    gt_bbox = gt_bbox[:valid_gt].numpy()
-    gt_class_id = gt_class_id[:valid_gt].numpy()
-    gt_mask = gt_masks[:valid_gt]
-    gt_mask = tf.transpose(gt_mask,(1,2,0)).numpy()
-    return gt_bbox, gt_class_id, gt_mask
+    mask = gt_class_id>cfg.CONF_THRESH
+    gt_bbox = gt_bbox.numpy()
+    gt_mask = gt_masks.numpy()
+    return gt_bbox[mask], gt_class_id[mask], gt_mask[mask]
     
-def show_infer(data, prediction):
-    image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
-    nB = tf.shape(image)[0]
-    if len(prediction)>2:
-        preds, proposals, masks = prediction
-        for i in range(nB):
-            bbox, pred_class_id, conf, mask_mrcnn = decode_mask(proposals[i], masks[i], 'cut')
-            if len(bbox)>0:
-                draw_bbox(image[i], bboxs = bbox, prop = bbox, masks = mask_mrcnn, conf_id = conf, mode= 'PIL')
-            else:
-                show_image(tf.cast(image*255,tf.uint8).numpy()[i])
-            tf.print('Found {} subjects'.format(len(bbox)))
-    else:
-        preds, proposals = prediction
-        for i in range(nB):
-            bbox, conf = decode_proposal(proposals[i], 'cut')
-            if len(bbox)>0:
-                draw_bbox(image[i], prop = bbox, conf_id = conf, mode= 'PIL')
-            else:
-                show_image(tf.cast(image*255,tf.uint8).numpy()[i])
-            tf.print('Found {} subjects'.format(len(bbox)))
+def show_infer(data, prediction, class_dict):
+    images, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+    boxes, confs, class_ids, masks = prediction
+    for image, box, conf, class_id, mask in zip(images, boxes, confs, class_ids, masks):
+        box, conf, class_id, mask = decode_mask(box, conf, class_id, mask, 'cut')
+        if len(box)>0:
+            draw_bbox(image, box, conf, class_id, mask, class_dict, mode= 'PIL')
+        else:
+            show_image(tf.cast(image*255,tf.uint8).numpy())
+        tf.print('Found {} subjects'.format(len(box)))
+ 
     
 def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
-    nB = tf.shape(image)[0]
     mean_AP = []
-    if len(prediction)>2: # if masks are present TODO
-        preds, proposals, masks = prediction
-        for i in range(nB):
-            gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_bboxes[i], gt_masks[i])
-            pred_box, pred_class_id, pred_score, pred_mask = decode_mask(proposals[i], masks[i])
-            if len(gt_bbox)>0: # this is never the case but better to put
-                AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
-                         pred_box, pred_class_id, pred_score, pred_mask,
-                         iou_thresholds=iou_thresholds, verbose=verbose)
-                mean_AP.append(AP)
+    boxes, confs, class_ids, masks = prediction
+    for gt_mask, gt_bbox, box, conf, class_id, mask in zip(gt_masks, gt_bboxes, boxes, confs, class_ids, masks):
+        gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_mask, gt_bbox)
+        pred_box, pred_score, pred_class_id, pred_mask = decode_mask(box, conf, class_id, mask,'cut')
+        gt_mask = np.transpose(gt_mask,(1,2,0))
+        pred_mask = np.transpose(pred_mask,(1,2,0))
+        if len(gt_bbox)>0: # this is never the case but better to put
+            AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
+                     pred_box, pred_class_id, pred_score, pred_mask,
+                     iou_thresholds=iou_thresholds, verbose=verbose)
+            mean_AP.append(AP)
     if len(mean_AP) == 0: # this is never the case, but better to exclude the situation
         mean_AP = [0.5]
     return np.mean(mean_AP)            
     
-def draw_bbox(image, bboxs=None, prop=None, masks=None, conf_id=None, mode='return'):
-    colors = []
-    for name, code in ImageColor.colormap.items():
-         colors.append(name)
-#    np.random.shuffle(colors)
-    if np.any(bboxs is not None):
-        bboxs = bboxs[...,:4]
+def draw_bbox(image, box=None, conf=None, class_id=None, mask=None, class_dict=None, mode='return'):
+    if np.any(class_id is None):
+        class_id = np.arange(len(box))
+    elif class_dict is not None:
+        class_id = [class_dict[int(c)] for c in class_id]
     img = Image.fromarray(np.array(image*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   
-
-    if np.any(bboxs is not None):
-        if np.any(conf_id is None):
-            conf_id = np.arange(len(bboxs))
-        for i,(bbox,conf) in enumerate(zip(bboxs, conf_id)):
-            if np.any(bbox>0):
-                draw.rectangle(bbox, outline = colors[i%len(colors)]) 
-                xy = ((bbox[2]+bbox[0])*0.5, (bbox[3]+bbox[1])*0.5)
-                draw.text(xy, str(np.round(conf,3)), font=ImageFont.truetype("./other/arial.ttf"), fontsize = 15, fill=colors[i%len(colors)])
+    if np.any(box is not None):
+        for i,(bb,cc) in enumerate(zip(box, class_id)):
+            if np.any(bb>0):
+                draw.rectangle(bb, outline = COLORS[i%len(COLORS)]) 
+                xy = ((bb[2]+bb[0])*0.5, (bb[3]+bb[1])*0.5)
+                if not type(cc) is str:
+                    cc = str(np.round(cc,3))
+                draw.text(xy, cc, \
+                          font=ImageFont.truetype("./other/arial.ttf"), \
+                          fontsize = 15, fill=COLORS[i%len(COLORS)])
     img = np.array(img)
-    if np.any(masks is not None):
-        masks = np.transpose(masks,(2,0,1))
-        for i, (mask, pro) in enumerate(zip(masks, prop)):
-            xyxy = np.array(pro,dtype=np.int32)
+    if np.any(mask is not None):
+        for i, (mm, bb) in enumerate(zip(mask, box)):
+            xyxy = np.array(bb,dtype=np.int32)
             if np.any(xyxy>0):
-                mask = unmold_mask(mask, xyxy, img.shape)
-                mask = np.array(Image.new('RGB', (img.shape[0], img.shape[1]), color = colors[i%len(colors)]))*np.tile(mask[...,None],(1,1,3))
-                img[mask>0] = img[mask>0]*0.5+mask[mask>0]*0.5
+                mm = unmold_mask(mm, xyxy, img.shape)
+                mm = np.array(Image.new('RGB', (img.shape[0], img.shape[1]), \
+                                        color = COLORS[i%len(COLORS)])) * \
+                                        np.tile(mm[...,None],(1,1,3))
+                img[mm>0] = img[mm>0]*0.5+mm[mm>0]*0.5
     if mode == 'PIL':
         show_image(img)
     else:
@@ -432,7 +416,8 @@ def encode_labels(bboxes):
 def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     target = tf.cast(target, tf.float32)
     bbox = target[:,:4]/cfg.TRAIN_SIZE
-    ids = target[:,4]-1.
+    # encode from 0 to num_class-1
+    ids = tf.math.subtract(target[:,4],1.)
     
     gt_boxes = tf.clip_by_value(bbox, 0.0, 1.0)
     gt_boxes = xyxy2xywh(bbox)
@@ -440,7 +425,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     anchor_wh = tf.cast(anchor_wh, tf.float32)
     tbox = tf.zeros((nA, nGh, nGw, 4))
     tconf = tf.zeros(( nA, nGh, nGw))
-    tid = tf.zeros((nA, nGh, nGw, 1))-1.
+    tid = tf.fill(dims=(nA, nGh, nGw, 1),value=-1.)
     
     anchor_mesh = generate_anchor(nGh, nGw, anchor_wh)# Shape nA x 4 x nGh x nGw
     anchor_mesh = tf.transpose(anchor_mesh, (0,2,3,1))# Shpae nA x nGh x nGw x 4 
@@ -469,11 +454,6 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC):
     cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
     
     tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, 1)), tid)
-    
-#    indices = tf.cast(tid-1.0,tf.int32)[...,0] # -1 because we pass from id to indices 
-    
-#    category_id_one_hot = tf.one_hot(indices, depth = nC, on_value=1.0, off_value=0.0,axis=-1)
-    
     fg_anchor_list = anchor_mesh[fg_index] 
     delta_target = encode_delta(gt_box_list, fg_anchor_list)
     tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
@@ -640,7 +620,7 @@ def check_proposals_tensor(proposal):
     proposal = nms_proposals(proposal)
 
     return proposal
-    
+#    
 #def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
 #    """This function compute nms proposals without iterating over the batch """
 #    pconf = proposal[...,4:5]
@@ -653,39 +633,39 @@ def check_proposals_tensor(proposal):
 #    proposal = tf.concat([proposal,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
 #    return proposal
 
-def nms_proposals_tensor(proposal):
-    """This function compute nms proposals without iterating over the batch """
-    pconf = proposal[...,4:5] * proposal[...,5:]
-    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
-    boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
-            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
-            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
-    category+=1.
-    proposal = tf.concat([boxes,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
-    return proposal
+#def nms_proposals_tensor(proposal):
+#    """This function compute nms proposals without iterating over the batch """
+#    pconf = proposal[...,4:5] * proposal[...,5:]
+#    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
+#    boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
+#            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
+#            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+#    category+=1.
+#    proposal = tf.concat([boxes,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
+#    return proposal
 
 def nms_proposals(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = proposal[..., 4]
+   pconf = proposal[..., 4] 
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
    return proposal
 #
-#def nms_proposals_tensor(proposal):
-#   # non max suppression
-#   pboxes = proposal[...,:4]
-#   pconf = proposal[..., 4]
-#   indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
-#
-#   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
-#   pbbox = proposal[...,:4]
-#   pconf = proposal[...,4:5]
-#   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]+1.
-#   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  
-#   
-#   return proposal
+def nms_proposals_tensor(proposal):
+   # non max suppression
+   pboxes = proposal[...,:4]
+   pconf = proposal[..., 4]
+   indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
+
+   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
+   pbbox = proposal[...,:4]
+   pconf = proposal[...,4:5]
+   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]+1.
+   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  
+   
+   return proposal
 #
 ## Non-max suppression
 #def nms(proposals):
@@ -734,6 +714,7 @@ def preprocess_target_indices(proposal_gt_mask):
 
 def crop_and_resize(proposal_gt_bbox_gt_mask):
     proposal, target_class_id, target_mask = proposal_gt_bbox_gt_mask
+    nP = tf.shape(proposal)[0]
     targets = tf.where(tf.greater(target_class_id,0))[:,0]
     proposals_ = tf.gather(proposal, targets, axis=0)
     x1, y1, x2, y2 = tf.unstack(xywh2xyxy(proposals_[...,:4]), axis=-1)
@@ -744,7 +725,7 @@ def crop_and_resize(proposal_gt_bbox_gt_mask):
                                            box_indices = box_indices, crop_size=(cfg.MASK_SIZE,cfg.MASK_SIZE),method="bilinear")[...,0]
     target_mask = tf.round(target_mask)
     target_mask = tf.clip_by_value(target_mask,0.0,1.0)
-    target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(cfg.MAX_PROP,cfg.MASK_SIZE,cfg.MASK_SIZE))
+    target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(nP,cfg.MASK_SIZE,cfg.MASK_SIZE))
     return target_mask
     
 def preprocess_mrcnn(proposals, gt_bboxes, gt_masks):

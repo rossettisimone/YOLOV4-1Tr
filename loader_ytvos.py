@@ -12,7 +12,7 @@ class DataLoader(object):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.augment = augment
-        self.annotation, self.annotation_list, self.dict_classes, self.nIDs = self.preprocess_json_dataset()
+        self.annotation, self.annotation_list, self.class_dict, self.nIDs = self.preprocess_json_dataset()
         self.train_list, self.val_list = self.split_dataset()
         self.train_ds = self.initilize_train_ds()
         self.val_ds = self.initilize_val_ds()
@@ -28,14 +28,15 @@ class DataLoader(object):
         json_train_dataset = file_reader(cfg.YT_TRAIN_ANNOTATION_PATH)
         # json_val_dataset = file_reader(cfg.YT_VAL_ANNOTATION_PATH)
         # json_test_dataset = file_reader(cfg.YT_TEST_ANNOTATION_PATH)
-        dict_classes = json_train_dataset['categories']
+        class_dict = json_train_dataset['categories']
+        class_dict = { d['id']:d['name'] for d in class_dict }
         nIDs = self.count(json_train_dataset)
         annotations = self.parse_frames(json_train_dataset)
         # annotation_val = self.parse_frames(json_val_dataset)
         train_list = np.arange(len(annotations))
         nIDs = len(annotations)
         # val_list = np.arange(len(annotation_val))
-        return annotations, train_list, dict_classes, nIDs
+        return annotations, train_list, class_dict, nIDs
     
     def count(self, json_dataset):
         nID = 0
@@ -61,14 +62,14 @@ class DataLoader(object):
                 new_note['bboxes'] = []
                 new_note['areas'] = []
                 new_note['category_id'] = []
-                new_note['ids'] = []
+                new_note['instance_ids'] = []
                 for notes in annotations:                    
                     if notes['bboxes'][i] != None and notes['areas'][i] != None and notes['segmentations'][i] != None:
                         new_note['segmentations'].append(notes['segmentations'][i]['counts'].copy())
                         new_note['bboxes'].append(notes['bboxes'][i].copy())
                         new_note['areas'].append(notes['areas'][i])
                         new_note['category_id'].append(notes['category_id'])
-                        new_note['ids'].append(notes['id'])
+                        new_note['instance_ids'].append(notes['id'])
                 if len(new_note['segmentations'])>0:
                     parsed_dataset.append(new_note)
         return parsed_dataset
@@ -115,7 +116,6 @@ class DataLoader(object):
         image, masks, bboxes, good_sample = self._data_generator(index)
         if good_sample:
             if self.augment:
-                image = random_brightness(image)
                 image, masks, bboxes = data_augment(image, masks, bboxes)
             image, masks, bboxes = data_preprocess(image, bboxes, masks)
             masks, bboxes = data_check(masks, bboxes)
@@ -160,13 +160,13 @@ class DataLoader(object):
         boxes = sample['bboxes']
 #        areas = sample['areas']
         file_name = sample['file_names']
-        ids = sample['ids']
+        instance_ids = sample['instance_ids']
         path = os.path.join(cfg.YT_TRAIN_FRAMES_PATH, file_name)
         bboxes = []
         masks = [] 
         try:
             image = np.array(read_image(path))
-            for segmentation, bbox, category_id, instance_id in zip(segmentations, boxes, category_ids, ids):
+            for segmentation, bbox, category_id, instance_id in zip(segmentations, boxes, category_ids, instance_ids):
                 bbox = np.array(bbox)
                 bbox = np.array(np.r_[bbox[:2],bbox[:2]+bbox[2:4],category_id,instance_id], dtype = np.int32)
                 if bbox[2]>bbox[0] and bbox[3]>bbox[1]:

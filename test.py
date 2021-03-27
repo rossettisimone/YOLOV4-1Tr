@@ -95,7 +95,7 @@ print("Time:", timeit.timeit(lambda: iterator.next(), number=trials)/trials)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET ENCODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 from loader_ytvos import DataLoader
-from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize
+from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize,decode_ground_truth
 import matplotlib.pyplot as plt
 
 ds = DataLoader(shuffle=False, augment=False)
@@ -104,13 +104,14 @@ iterator = ds.train_ds.unbatch().batch(1).__iter__()
 #%%
 from layers import yolov4_plus1_proposal_graph
 from utils import decode_labels
-for i in range(10):
+for i in range(1):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
     data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
     gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
-    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = gt_bboxes[0,...,4].numpy(), mode= 'PIL')
+    gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
+    draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
 
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
     plt.show()
@@ -124,16 +125,17 @@ for i in range(10):
     predictions = [label_2,label_3,label_4,label_5]
     proposals = decode_labels(predictions)
     class_ids = proposals[...,5]+1
-    draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, prop = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id=class_ids[0].numpy(),  mode= 'PIL')
+    gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
+    draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
 
 #%%
 from model import get_model
 
-model = get_model()
+model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.07--5.154.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.31--5.947.h5')
 
 model.trainable = False
 
@@ -267,38 +269,24 @@ draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mo
 import matplotlib.pyplot as plt
 from loader_ytvos import DataLoader 
 #import time
-from utils import show_infer, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh
+from utils import show_infer, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth
 
-i = 0
-sec = 0
-AP = 0
+
 ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
-for i in range(1):
-    data = iterator.next()
-    image, gt_masks, gt_bboxes = data
-    gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
-#    start = time.perf_counter()
-    predictions = model.infer(image)
-    preds, proposals, pred_mask = predictions
-    class_ids = tf.cast(proposals[...,5], tf.int32)
-    pred_mask *= 10
-    pred_mask = tf.transpose(pred_mask, [0, 1, 4, 2, 3])
-    indices = tf.stack([tf.tile(tf.range(0,pred_mask.shape[1])[None],(pred_mask.shape[0],1)), class_ids], axis=2)
-    pred_mask = tf.gather_nd(pred_mask[0], indices[0],batch_dims=0)[None,...,None]
-    pbox, pconf, pclass = tf.split(proposals, (4,1,1), axis=-1)
-    proposals = tf.concat([pbox, pconf, pclass],axis=-1)
-    predictions = preds, proposals, pred_mask
-#    end = time.perf_counter()-start
-    i+=1
-#    sec += end
-#    print(i/sec)
-    label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
-    data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-    show_infer(data_, predictions)
-    AP += show_mAP(data_, predictions)
-    mAP = AP/i    
-    print(mAP)
-    draw_bbox(image[0].numpy(), bboxs = gt_bboxes[0].numpy(), prop = gt_bboxes[0,...,:4].numpy(), masks=tf.transpose(gt_masks[0],(1,2,0)).numpy(), conf_id = gt_bboxes[0,...,4].numpy(), mode= 'PIL')
+AP = 0
+#for i in range(1):
+data = iterator.next()
+image, gt_masks, gt_bboxes = data
+gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+predictions = model.infer(image)
+box, conf, class_id, mask = predictions
+label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
+data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
+show_infer(data_, predictions, ds.class_dict)
+AP = show_mAP(data_, predictions)
+print(AP)
+gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
+draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
