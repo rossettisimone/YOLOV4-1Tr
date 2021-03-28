@@ -163,53 +163,62 @@ def yolov4_plus1_decode_graph(input_layer):
         p_4: [batch, num_anchors, train_size/stride[2], train_size/stride[2], bbox_dim+conf_dim]
         p_5: [batch, num_anchors, train_size/stride[3], train_size/stride[3], bbox_dim+conf_dim]
         
-        e_2: [batch, train_size/stride[0], train_size/stride[0], embedding_dim]
-        e_3: [batch, train_size/stride[1], train_size/stride[1], embedding_dim]
-        e_4: [batch, train_size/stride[2], train_size/stride[2], embedding_dim]
-        e_5: [batch, train_size/stride[3], train_size/stride[3], embedding_dim]
+        e_2: [batch, train_size/stride[0], train_size/stride[0], num_classes]
+        e_3: [batch, train_size/stride[1], train_size/stride[1], num_classes]
+        e_4: [batch, train_size/stride[2], train_size/stride[2], num_classes]
+        e_5: [batch, train_size/stride[3], train_size/stride[3], num_classes]
+        
+        f_2: [batch, train_size/stride[0], train_size/stride[0], embedding_dim]
+        f_3: [batch, train_size/stride[1], train_size/stride[1], embedding_dim]
+        f_4: [batch, train_size/stride[2], train_size/stride[2], embedding_dim]
+        f_5: [batch, train_size/stride[3], train_size/stride[3], embedding_dim]
         
     """
     
     n_2, n_3, n_4, n_5 = input_layer
     
-    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CONF + cfg.NUM_CLASSES
+    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CONF #+ cfg.NUM_CLASSES
     prediction_filters = cfg.NUM_ANCHORS * prediction_channels
     
-    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    f_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.NUM_CLASSES, activate=False, bn=False)
     x = Conv2D(n_2, kernel_size = 3, filters = 64)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    f_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.NUM_CLASSES, activate=False, bn=False)
     x = Conv2D(n_3, kernel_size = 3, filters = 128)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    f_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.NUM_CLASSES, activate=False, bn=False)
     x = Conv2D(n_4, kernel_size = 3, filters = 256)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    f_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
+    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.NUM_CLASSES, activate=False, bn=False)
     x = Conv2D(n_5, kernel_size = 3, filters = 512)
     x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
     p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
                                       prediction_channels]), perm = [0, 3, 1, 2, 4])
     
-    return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
+    return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5], [f_2,f_3,f_4,f_5]
 
 ############################################################
 #  YOLOV4+1 proposals decode graph
 ############################################################
 
-def yolov4_plus1_proposal_graph(predictions):
+def yolov4_plus1_proposal_graph(predictions, embeddings):
     """
     YOLOv4 decoding is applied and shift wrt to anchors is parsed:
         ANCHORS: 4 anchors for 4 levels, each anchors is made by width W and height H
@@ -231,10 +240,11 @@ def yolov4_plus1_proposal_graph(predictions):
     """
     ANCHORS = tf.reshape(tf.constant(cfg.ANCHORS,dtype=tf.float32),[cfg.LEVELS, cfg.NUM_ANCHORS, 2])
     p_2, p_3, p_4, p_5 = predictions
-    d_2 = decode_prediction(p_2, ANCHORS[0], cfg.STRIDES[0])
-    d_3 = decode_prediction(p_3, ANCHORS[1], cfg.STRIDES[1])    
-    d_4 = decode_prediction(p_4, ANCHORS[2], cfg.STRIDES[2])    
-    d_5 = decode_prediction(p_5, ANCHORS[3], cfg.STRIDES[3])
+    e_2, e_3, e_4, e_5 = embeddings
+    d_2 = decode_prediction(p_2, e_2, ANCHORS[0], cfg.STRIDES[0])
+    d_3 = decode_prediction(p_3, e_3, ANCHORS[1], cfg.STRIDES[1])    
+    d_4 = decode_prediction(p_4, e_4, ANCHORS[2], cfg.STRIDES[2])    
+    d_5 = decode_prediction(p_5, e_5, ANCHORS[3], cfg.STRIDES[3])
     proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels
     proposals = nms_proposals_tensor(proposals)
     

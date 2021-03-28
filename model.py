@@ -28,16 +28,16 @@ class Model(tf.keras.Model):
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_loss, box_loss, conf_loss, class_loss, mask_loss = val_step(self, data)
-        return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss," class_loss": class_loss,  \
+        return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss,"class_loss": class_loss,  \
                 "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_d":self.s_d, "s_m":self.s_m }
     
 def get_model(pretrained_backbone=True, infer=False):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
     backbone = cspdarknet53_graph(input_layer) # may try a smaller backbone? backbone = cspdarknet53_tiny(input_layer)
     neck = yolov4_plus1_graph(backbone)
-    rpn_predictions, rpn_embeddings = yolov4_plus1_decode_graph(neck)
-    rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions)
-    pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_embeddings])
+    rpn_predictions, rpn_embeddings, rpn_features = yolov4_plus1_decode_graph(neck)
+    rpn_proposals = yolov4_plus1_proposal_graph(rpn_predictions,rpn_embeddings)
+    pooled_rois_mask = PyramidROIAlign_AFP((cfg.MASK_POOL_SIZE, cfg.MASK_POOL_SIZE),name="roi_align_mask")([rpn_proposals[...,:4],rpn_features])
     mrcnn_mask = mask_graph_AFP(pooled_rois_mask)
     #backbone, neck,pooled_rois_classifier, pooled_rois_mask,
     if infer:
@@ -46,7 +46,7 @@ def get_model(pretrained_backbone=True, infer=False):
         mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
         model = Model(inputs=input_layer, outputs=[box, conf, class_id, mask])
     else:
-        model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_mask])
+        model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask])
         if pretrained_backbone:
             load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
             freeze_backbone(model)
@@ -64,10 +64,10 @@ def train_step(model, data, optimizer):
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
     with tf.GradientTape() as tape:
-        preds, proposals, pred_mask = model(image, training=training)
+        preds, embs, proposals, pred_mask = model(image, training=training)
         proposals = proposals[...,:4]
         target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-        alb_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
+        alb_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_masks, pred_mask, training)
     gradients = tape.gradient(alb_loss, model.trainable_variables)
     optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables) if grad is not None)
     return [alb_loss] + loss_list
@@ -76,15 +76,15 @@ def val_step(model, data):
     training = False
     image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
     labels = [label_2, labe_3, label_4, label_5]
-    preds, proposals, pred_mask = model(image, training=training)
+    preds, embs, proposals, pred_mask = model(image, training=training)
     proposals = proposals[...,:4]
     target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
-    alb_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_mask, training)
+    alb_loss, *loss_list = compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_masks, pred_mask, training)
     return [alb_loss] + loss_list
 
-def compute_loss(model, labels, preds, proposals, target_class_ids, target_masks, pred_masks, training):
+def compute_loss(model, labels, preds, embs, proposals, target_class_ids, target_masks, pred_masks, training):
     # rpn loss 
-    alb_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds)
+    alb_loss, *rpn_loss_list = compute_loss_rpn(model, labels, preds, embs)
     # mrcnn loss
     alb_total_loss, *mrcnn_loss_list = compute_loss_mrcnn(model, proposals, target_class_ids, target_masks, pred_masks)
     alb_total_loss += alb_loss
@@ -92,12 +92,12 @@ def compute_loss(model, labels, preds, proposals, target_class_ids, target_masks
 
     return [alb_total_loss] + rpn_loss_list + mrcnn_loss_list
 
-def compute_loss_rpn(model, labels, preds):
+def compute_loss_rpn(model, labels, preds, embs):
     box_loss = []
     conf_loss = []
     class_loss = []
-    for label, pred in zip(labels, preds):
-        lbox, lconf, lclass = compute_loss_rpn_level(label, pred)
+    for label, pred, emb in zip(labels, preds, embs):
+        lbox, lconf, lclass = compute_loss_rpn_level(label, pred, emb)
         box_loss.append(lbox)
         conf_loss.append(lconf)
         class_loss.append(lclass)
@@ -106,8 +106,8 @@ def compute_loss_rpn(model, labels, preds):
                 + (model.s_r + model.s_c + model.s_d) #Automatic Loss Balancing        
     return alb_loss, box_loss, conf_loss, class_loss
 
-def compute_loss_rpn_level(label, pred):
-    pbox, pconf, pclass = pred[..., :4], pred[..., 4:6], pred[..., 6:]
+def compute_loss_rpn_level(label, pred, emb):
+    pbox, pconf, pclass = pred[..., :4], pred[..., 4:6], emb
     tbox, tconf, tid = label[...,:4], label[...,4], label[..., 5]
     # regression loss
     # stop gradient for regions labeled -1 or 0 below CONF threshold
@@ -127,6 +127,7 @@ def compute_loss_rpn_level(label, pred):
     lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
     # classification loss
     # stop gradient for regions labeled -1 below CONF threshold
+    tid = tf.reduce_max(tid, axis=1)
     non_negative_entry = tf.greater_equal(tid,0.0)
     pclass = entry_stop_gradients(pclass, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32))
     tid = tf.cast(tf.where(non_negative_entry, tid, 0.0),tf.int32)

@@ -48,7 +48,7 @@ TOLERANCE = [0.4, 0.6, 0.8, 1.0]
 
 IOU_THRESH = 0.5
 # Network
-NUM_CLASSES = 41
+NUM_CLASSES = 40
 
 ANCHORS = [2,2, 4,7, 6,14, 8,3, 
            20,15, 22,41, 25,24, 34,48, 

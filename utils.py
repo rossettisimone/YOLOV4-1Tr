@@ -589,12 +589,13 @@ def decode_delta_map(delta_map, anchors):
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
     
-def decode_prediction(prediction, anchors, stride):
+def decode_prediction(prediction, embedding, anchors, stride):
     prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
     pconf = prediction[..., 4:6]  # class
-    pconf = tf.nn.softmax(pconf)[...,1:] # class
-    pclass = prediction[..., 6:]  # class
-    pclass = tf.nn.softmax(pclass) # class
+    pconf = tf.nn.softmax(pconf, axis=-1)[...,1:] # class
+    pclass = embedding #prediction[..., 6:]  # class
+    pclass = tf.nn.softmax(pclass, axis=-1) # class
+    pclass = tf.tile(pclass[:,tf.newaxis,:,:,:],(1,cfg.NUM_ANCHORS,1,1,1))
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
