@@ -127,15 +127,16 @@ def compute_loss_rpn_level(label, pred, emb):
     lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
     # classification loss
     # stop gradient for regions labeled -1 below CONF threshold
-    tid = tf.reduce_max(tid, axis=1)
     non_negative_entry = tf.greater_equal(tid,0.0)
-    pclass = entry_stop_gradients(pclass, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32))
-    tid = tf.cast(tf.where(non_negative_entry, tid, 0.0),tf.int32)
-    non_negative_entry = tf.stop_gradient(non_negative_entry)
+    non_overlap_non_negative_entry = tf.equal(tf.reduce_sum(tf.cast(non_negative_entry,tf.float32),axis=1),1.0)
+    pclass = entry_stop_gradients(pclass, tf.cast(non_overlap_non_negative_entry[...,tf.newaxis],tf.float32))
+    tid = tf.reduce_max(tid, axis=1) # reduce max but ignore overlapping areas
+    tid = tf.cast(tf.where(non_overlap_non_negative_entry, tid, 0.0),tf.int32)
+    non_overlap_non_negative_entry = tf.stop_gradient(non_overlap_non_negative_entry)
     tid = tf.stop_gradient(tid)
-    lclass = tf.cond(tf.greater(tf.size(tid[non_negative_entry]),0), \
-                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[non_negative_entry], \
-                                                                                       logits=pclass[non_negative_entry])), \
+    lclass = tf.cond(tf.greater(tf.size(tid[non_overlap_non_negative_entry]),0), \
+                     lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[non_overlap_non_negative_entry], \
+                                                                                       logits=pclass[non_overlap_non_negative_entry])), \
                      lambda: tf.constant(0.0))
     return lbox, lconf, lclass
 
