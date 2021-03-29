@@ -7,7 +7,7 @@ Created on Thu Feb 11 10:37:33 2021
 """
 import numpy as np
 
-# from now one code take from Matterport MaskRCNN
+# code take from Matterport MaskRCNN
 
 def compute_ap_range(gt_box, gt_class_id, gt_mask,
                      pred_box, pred_class_id, pred_score, pred_mask,

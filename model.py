@@ -10,7 +10,7 @@ class Model(tf.keras.Model):
     @tf.function
     def infer(self, inputs):
         return self(inputs, training=False)
-    
+
     def compile(self, optimizer):
         super(Model, self).compile()
         self.optimizer = optimizer
@@ -208,3 +208,31 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
                    lambda: tf.constant(0.0))
     loss = tf.reduce_mean(loss)
     return loss
+
+def log_compute_mAP(epoch, logs):
+    # Use the model to predict the values from the validation dataset.
+    _, _, rpn_proposals, mrcnn_mask = model.predict(test_images)
+    box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
+    box = tf.round(box*cfg.TRAIN_SIZE)
+    mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+  
+    image, label_2, labe_3, label_4, label_5, gt_masks, gt_bboxes = data
+    mean_AP = []
+    boxes, confs, class_ids, masks = prediction
+    for gt_mask, gt_bbox, box, conf, class_id, mask in zip(gt_masks, gt_bboxes, boxes, confs, class_ids, masks):
+        gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_mask, gt_bbox)
+        pred_box, pred_score, pred_class_id, pred_mask = decode_mask(box, conf, class_id, mask,'cut')
+        gt_mask = np.transpose(gt_mask,(1,2,0))
+        pred_mask = np.transpose(pred_mask,(1,2,0))
+        if len(gt_bbox)>0: # this is never the case but better to put
+            AP = compute_ap_range(gt_bbox, gt_class_id, gt_mask,
+                     pred_box, pred_class_id, pred_score, pred_mask,
+                     iou_thresholds=iou_thresholds, verbose=verbose)
+            mean_AP.append(AP)
+
+    # Log the confusion matrix as an image summary.
+    with file_writer_cm.as_default():
+        tf.summary.image("Confusion Matrix", cm_image, step=epoch)
+
+# Define the per-epoch callback.
+#cm_callback = keras.callbacks.LambdaCallback(on_epoch_end=log_confusion_matrix)
