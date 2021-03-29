@@ -95,14 +95,13 @@ print("Time:", timeit.timeit(lambda: iterator.next(), number=trials)/trials)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET ENCODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 from loader_ytvos import DataLoader
-from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize,decode_ground_truth
+from utils import show_infer, show_mAP, draw_bbox, filter_inputs, encode_labels, xyxy2xywh, crop_and_resize,decode_ground_truth, decode_mask
 import matplotlib.pyplot as plt
 
 ds = DataLoader(shuffle=True, augment=True)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 
 #%%
-from layers import yolov4_plus1_proposal_graph
 from utils import decode_labels
 for i in range(1):
     data = iterator.next()
@@ -120,10 +119,13 @@ for i in range(1):
     plt.show()
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_5[0],axis=0),axis=-1))
     plt.show()
-#    predictions = [label_2,label_3,label_4,label_5]
-#    proposals = decode_labels(predictions)
-#    gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
-#    draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
+    predictions = [label_2,label_3,label_4,label_5]
+    proposals = decode_labels(predictions)
+    bbox, conf, classs = tf.split(proposals[0], (4,1,1),axis=-1)
+    thr = conf[...,0]>cfg.CONF_THRESH
+    bbox, conf, classs = bbox[thr], conf[thr], classs[thr]
+    bbox= tf.round(bbox*cfg.TRAIN_SIZE)
+    draw_bbox(image[0].numpy(), box = bbox, class_id = classs, class_dict = ds.class_dict, mode= 'PIL')
 
 #%%
 from model import get_model

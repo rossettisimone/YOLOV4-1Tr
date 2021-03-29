@@ -438,9 +438,6 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     iou_pdist = bbox_iou(anchor_list, gt_boxes)# Shape (nA x nGh x nGw) x Ng
     iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
     max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
-    
-#    inter = tf.linalg.band_part(bbox_iou(gt_boxes, gt_boxes)-tf.eye(num_rows=tf.shape(gt_boxes)[0]), -1, 0)
-#    print(tf.where(tf.greater(inter,0.0)))
      
     iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
@@ -448,32 +445,24 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     id_index = iou_map > cfg.ID_THRESH * tol
     fg_index = iou_map > cfg.FG_THRESH * tol                                              
     bg_index = iou_map < cfg.BG_THRESH * tol
-    ign_index = tf.cast(tf.cast((iou_map < cfg.FG_THRESH),tf.float32) \
-                        * tf.cast((iou_map > cfg.BG_THRESH),tf.float32),tf.bool)
+    ign_index = tf.cast(tf.cast(tf.logical_not(fg_index),tf.float32) \
+                        * tf.cast(tf.logical_not(bg_index),tf.float32),tf.bool)
     tconf = tf.where(fg_index, 1.0, tconf)
     tconf = tf.where(bg_index, 0.0, tconf)
     tconf = tf.where(ign_index, -1.0, tconf)
     tconf = tconf[...,None]
 
-    gt_index = tf.boolean_mask(gt_index_map,fg_index)
-    gt_box_list = tf.gather(gt_boxes,gt_index)
     gt_id_list = tf.gather(ids,tf.boolean_mask(gt_index_map,id_index))
-    
-#    import matplotlib.pyplot as plt 
-#    for p,m in zip(gt_index_map, id_index):
-#        plt.imshow(tf.where(m,p+1,0))
-#        plt.show()
-    
-    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
-    
     tid = tf.where(id_index[...,None], tf.scatter_nd(tf.where(id_index),  gt_id_list[:,None], (nA, nGh, nGw, 1)), tid)
-    tid = tf.where(ign_index[...,None],-1.0, tid)
     
     fg_anchor_list = anchor_mesh[fg_index] 
+    gt_box_list = tf.gather(gt_boxes,tf.boolean_mask(gt_index_map,fg_index))
     delta_target = encode_delta(gt_box_list, fg_anchor_list)
-    tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
+#    cond = tf.greater(tf.reduce_sum(tf.cast(fg_index,tf.float32)), 0)
+#    tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
+    tbox = tf.where(fg_index[...,None], tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), tbox)
         
-    label = tf.concat([tbox,tconf,tid],axis=-1)#tid
+    label = tf.concat([tbox,tconf,tid],axis=-1)
     # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
     label = tf.transpose(label,(0,2,1,3))
     return label
@@ -493,12 +482,11 @@ def decode_label(label, anchors, stride):
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC]) # b x nBB x (4 + 1 + 1 + 208) rois
    
-    pboxes = proposal[...,:4]
     pconf = proposal[..., 4]
-    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
+    indices = tf.argsort(pconf, axis=-1, direction='DESCENDING', stable=True)
+    proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
     
-    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1)
-    
+    proposal = check_proposals_tensor(proposal)
     
     return proposal
 
@@ -511,25 +499,17 @@ def decode_labels(predictions, embeddings = None):
     d_5 = decode_label(p_5, ANCHORS[3], cfg.STRIDES[3])
     
     proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels    
-    pboxes = proposals[...,:4]
-    pconf = proposals[..., 4]
-    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
-
-    proposal = tf.gather(proposals, indices, axis=1, batch_dims=1)  
     
-    nC = tf.shape(proposal)[2]
-    width = proposal[...,2] - proposal[...,0]
-    height = proposal[...,3] - proposal[...,1]
-    mask_dim = tf.logical_and(tf.greater(width, cfg.MIN_BOX_DIM), tf.greater(height, cfg.MIN_BOX_DIM))
-    mask_ratio = tf.logical_and(tf.greater(tf.divide(width,height), cfg.MIN_BOX_RATIO),\
-        tf.greater(tf.divide(height,width), cfg.MIN_BOX_RATIO))
-    mask = tf.logical_and(mask_dim,mask_ratio)
-    indices = tf.tile(tf.cast(mask, tf.float32)[...,tf.newaxis],(1,1,nC))
-    proposal = tf.multiply(proposal, indices) # remove the bad proposals
+    pbox, pconf, pclass = tf.split(proposals,(4,1,1),axis=-1)
     
+    pclass = tf.one_hot(tf.cast(pclass[...,0],tf.int32),cfg.NUM_CLASSES)
+    
+    proposals = tf.concat([pbox, pconf, pclass], axis=-1)
+    
+    proposals = nms_proposals_tensor(proposals)
     
 #    proposals = proposals * tf.tile(proposals[...,4][...,None],(1,1,tf.shape(proposals)[-1]))
-    return proposal
+    return proposals
 
 def generate_anchor(nGh, nGw, anchor_wh):
     nA = tf.shape(anchor_wh)[0]
