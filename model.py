@@ -43,21 +43,21 @@ def get_model(pretrained_backbone=True, infer=False):
     mrcnn_mask = mask_graph_AFP(pooled_rois_mask)
     #backbone, neck,pooled_rois_classifier, pooled_rois_mask,
     if infer:
-        bbox = decode_delta(mrcnn_bbox, xyxy2xywh(rpn_proposals[...,:4]))
-        bbox = xywh2xyxy(bbox)
-        bbox = tf.clip_by_value(bbox,0.0,1.0)
-        bbox = tf.round(bbox*cfg.TRAIN_SIZE)
-        conf = tf.nn.softmax(mrcnn_class_logits,axis=-1)
-        class_id = tf.add(tf.argmax(conf,axis=-1),tf.constant(1,dtype=tf.int64))
-        conf = tf.reduce_max(conf,axis=-1)
-        mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
-        model = Model(inputs=input_layer, outputs=[bbox, conf, class_id, mask])
+#        bbox = decode_delta(mrcnn_bbox, xyxy2xywh(rpn_proposals[...,:4]))
+#        bbox = xywh2xyxy(bbox)
+#        bbox = rpn_proposals[...,:4]
+#        bbox = tf.clip_by_value(bbox,0.0,1.0)
+#        bbox = tf.round(bbox*cfg.TRAIN_SIZE)
+#        conf = tf.nn.softmax(mrcnn_class_logits,axis=-1)
+#        class_id = tf.add(tf.argmax(conf,axis=-1),tf.constant(1,dtype=tf.int64))
+#        conf = tf.reduce_max(conf,axis=-1)
+#        mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+        model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_class_logits, \
+                                                   mrcnn_bbox, mrcnn_mask])
     else:
         model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_class_logits, \
                                                    mrcnn_bbox, mrcnn_mask])
-        if pretrained_backbone:
-            load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
-            freeze_backbone(model)
+
         model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
         model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
         model.s_mc = tf.Variable(initial_value=0.0, trainable=True, name = 's_mc')

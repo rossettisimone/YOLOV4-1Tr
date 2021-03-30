@@ -33,7 +33,7 @@ model.compile(optimizer)
 from utils import encode_labels, preprocess_mrcnn
 from layers import yolov4_plus1_proposal_graph
 from model import compute_loss
-#
+#%%
 #ds = DataLoader(shuffle=True, augment=False)
 #iterator = ds.train_ds.unbatch().batch(1).__iter__()
 image, gt_masks, gt_bboxes = iterator.next()
@@ -44,18 +44,23 @@ label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_outp
 training = True
 labels = [label_2, label_3, label_4, label_5]
 #with tf.GradientTape() as tape:
-preds, proposals, pred_masks = model(image, training=training)
+preds, proposals, pred_class, pred_bbox, pred_mask = model(image, training=training)
 #preds = labels
-
+proposal = gt_bboxes[...,:4]/cfg.TRAIN_SIZE
+preds = labels
 #proposals = yolov4_plus1_proposal_graph(preds)
-class_ids = proposals[...,5]
-conf = proposals[...,4]
-proposal = proposals[...,:4]
+#class_ids = proposals[...,5]
+#conf = proposals[...,4]
+#proposal = proposals[...,:4]
 
-target_class_ids, target_masks = preprocess_mrcnn(proposal, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
+target_class_ids, target_bboxes, target_masks = preprocess_mrcnn(proposal, gt_bboxes, gt_masks) # preprocess and tile labels according to IOU
 #pred_masks = target_masks[...,None]
+pred_mask = tf.concat([(((target_masks-1)*-2)-1)[...,None],((target_masks*2)-1)[...,None]],axis=-1)*100
+pred_class = tf.one_hot(target_class_ids-1,40)*100
+pred_bbox = target_bboxes
 
-alb_total_loss, *loss_list = compute_loss(model, labels, preds, proposal, target_class_ids, target_masks, pred_masks, training)
+alb_loss, *loss_list = compute_loss(model, labels, preds, proposals, target_class_ids, target_bboxes, target_masks, pred_class, pred_bbox, pred_mask)
+loss_list
 #gradients = tape.gradient(alb_total_loss, model.trainable_variables)
 #optimizer.apply_gradients((grad, var) for (grad, var) in zip(gradients, model.trainable_variables))
 #
@@ -134,7 +139,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.03--5.297.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.03--6.288.h5')
 
 model.trainable = False
 
@@ -275,13 +280,26 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
+from utils import decode_delta_fn, xyxy2xywh, xywh2xyxy
 AP = 0
 #for i in range(1):
 data = iterator.next()
 image, gt_masks, gt_bboxes = data
 gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
-predictions = model.infer(image)
-box, conf, class_id, mask = predictions
+rpn_predictions, rpn_proposals, mrcnn_class_logits, mrcnn_bbox, mrcnn_mask = model.infer(image)
+
+bbox = decode_delta_fn(mrcnn_bbox, xyxy2xywh(rpn_proposals[...,:4]))
+bbox = xywh2xyxy(bbox)
+bbox = rpn_proposals[...,:4]
+bbox = tf.clip_by_value(bbox,0.0,1.0)
+bbox = tf.round(bbox*cfg.TRAIN_SIZE)
+conf = tf.nn.softmax(mrcnn_class_logits,axis=-1)
+class_id = tf.add(tf.argmax(conf,axis=-1),tf.constant(1,dtype=tf.int64))
+conf = tf.reduce_max(conf,axis=-1)
+mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+
+#box, conf, class_id, mask = predictions
+predictions =bbox, conf, class_id, mask 
 label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
 show_infer(data_, predictions, ds.class_dict)

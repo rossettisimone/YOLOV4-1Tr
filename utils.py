@@ -551,6 +551,22 @@ def decode_delta(delta, fg_anchor_list):
     gh = ph * tf.math.exp(dh)
     return tf.stack([gx, gy, gw, gh], axis=1)
 
+def decode_delta_fn(delta, fg_anchor_list):
+    '''
+    :param: delta, shape (total_anchors, (dx, dy, dw, dh)) (log)
+    :param: fg_anchor_list, shape (total_anchors, (px, py, pw, ph))
+    
+    :output: total_anchors, (gx, gy, gw, gh)
+    '''
+    px, py, pw, ph = fg_anchor_list[..., 0], fg_anchor_list[...,1], \
+                     fg_anchor_list[..., 2], fg_anchor_list[...,3]
+    dx, dy, dw, dh = delta[..., 0], delta[..., 1], delta[..., 2], delta[..., 3]
+    gx = pw * dx + px
+    gy = ph * dy + py
+    gw = pw * tf.math.exp(dw)
+    gh = ph * tf.math.exp(dh)
+    return tf.stack([gx, gy, gw, gh], axis=-1)
+
 def decode_delta_map(delta_map, anchors):
     '''
     :param: delta_map, shape (nB, nA, nGh, nGw, 4)
