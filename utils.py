@@ -573,7 +573,6 @@ def decode_prediction(prediction, embedding, anchors, stride):
     pconf = tf.nn.softmax(pconf, axis=-1)[...,1:] # class
     pclass = embedding #prediction[..., 6:]  # class
     pclass = tf.nn.softmax(pclass, axis=-1) # class
-    pclass = tf.tile(pclass[:,tf.newaxis,:,:,:],(1,cfg.NUM_ANCHORS,1,1,1))
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]

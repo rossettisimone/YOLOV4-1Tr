@@ -109,11 +109,11 @@ class DataLoader(object):
             np.random.shuffle(self.val_list)
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.AUTO
-        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.val_list], output_types=(tf.int32)).repeat()
+        ds = tf.data.Dataset.from_generator(self.input_generator, args=[self.val_list[:cfg.STEPS_PER_EPOCH_VAL*self.batch_size]], output_types=(tf.int32)).repeat()
         ds = ds.map(self.read_transform_val, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         ds = ds.filter(self.filter_inputs).with_options(options)
         ds = ds.batch(self.batch_size, drop_remainder=True)
-        ds = ds.take(cfg.STEPS_PER_EPOCH_VAL).prefetch(tf.data.experimental.AUTOTUNE)
+        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
         return ds
     
     def _single_input_generator_train(self, index):

@@ -129,7 +129,6 @@ def compute_loss_rpn_level(label, pred, emb):
     # stop gradient for regions labeled -1 below CONF threshold
 #    tid = tf.reduce_max(tid, axis=1) # reduce max but ignore overlapping areas
     non_negative_entry = tf.greater_equal(tid,0.0)
-    pclass = tf.tile(pclass[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
 #    non_overlap_non_negative_entry = tf.equal(tf.reduce_sum(tf.cast(non_negative_entry,tf.float32),axis=1),1.0)
     pclass = entry_stop_gradients(pclass, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32))
     tid = tf.cast(tf.where(non_negative_entry, tid, 0.0),tf.int32)
