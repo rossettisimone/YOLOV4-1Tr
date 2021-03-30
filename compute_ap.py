@@ -9,6 +9,24 @@ import numpy as np
 
 # code take from Matterport MaskRCNN
 
+def compute_ap_range_new(gt_box, gt_class_id, gt_mask,
+                     pred_box, pred_class_id, pred_score, pred_mask):
+    """Compute AP over a range or IoU thresholds. Default range is 0.5-0.95."""
+    # Default is 0.5 to 0.95 with increments of 0.05
+    iou_thresholds = np.arange(0.5, 1.0, 0.05)
+    
+    # Compute AP over range of IoU thresholds
+    AP = {}
+    for iou_threshold in iou_thresholds:
+        ap, precisions, recalls, overlaps =\
+            compute_ap(gt_box, gt_class_id, gt_mask,
+                        pred_box, pred_class_id, pred_score, pred_mask,
+                        iou_threshold=iou_threshold)
+        AP["AP @{:.2f}".format(iou_threshold)] = ap
+    AP["AP @{:.2f}-{:.2f}".format(iou_thresholds[0], iou_thresholds[-1])] = np.array(list(AP.values())).mean()
+    return AP
+
+
 def compute_ap_range(gt_box, gt_class_id, gt_mask,
                      pred_box, pred_class_id, pred_score, pred_mask,
                      iou_thresholds=None, verbose=1):

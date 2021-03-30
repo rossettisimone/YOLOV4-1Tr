@@ -11,7 +11,7 @@ import json
 import numpy as np
 import config as cfg
 import tensorflow as tf
-from compute_ap import compute_ap_range
+from compute_ap import compute_ap_range, compute_ap_range_new
 import skimage.transform
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor
@@ -266,7 +266,22 @@ def show_mAP(data, prediction, iou_thresholds = None, verbose = 0):
                      pred_box, pred_class_id, pred_score, pred_mask,
                      iou_thresholds=iou_thresholds, verbose=verbose)
             mean_AP.append(AP)
-    return np.mean(mean_AP)            
+    return np.mean(mean_AP)    
+
+def compute_mAP(data, prediction):
+    _, gt_masks, gt_bboxes = data
+    AP_list = []
+    boxes, confs, class_ids, masks = prediction
+    for gt_mask, gt_bbox, box, conf, class_id, mask in zip(gt_masks, gt_bboxes, boxes, confs, class_ids, masks):
+        gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_mask, gt_bbox)
+        pred_box, pred_score, pred_class_id, pred_mask = decode_mask(box, conf, class_id, mask,'keep')
+        gt_mask = np.transpose(gt_mask,(1,2,0))
+        pred_mask = np.transpose(pred_mask,(1,2,0))
+        if len(gt_bbox)>0: # this is never the case but better to put
+            AP = compute_ap_range_new(gt_bbox, gt_class_id, gt_mask,
+                     pred_box, pred_class_id, pred_score, pred_mask)
+            AP_list.append(AP)
+    return AP_list            
     
 def draw_bbox(image, box=None, conf=None, class_id=None, mask=None, class_dict=None, mode='return'):
     if np.any(class_id is None):
@@ -908,66 +923,134 @@ class EarlyStoppingRPN(tf.keras.callbacks.Callback):
         if self.stopped_epoch > 0:
             print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
 
-def plot_to_image(figure):
-  """Converts the matplotlib plot specified by 'figure' to a PNG image and
-  returns it. The supplied figure is closed and inaccessible after this call."""
-  # Save the plot to a PNG in memory.
-  buf = io.BytesIO()
-  plt.savefig(buf, format='png')
-  # Closing the figure prevents it from being displayed directly inside
-  # the notebook.
-  plt.close(figure)
-  buf.seek(0)
-  # Convert PNG buffer to TF image
-  image = tf.image.decode_png(buf.getvalue(), channels=4)
-  # Add the batch dimension
-  image = tf.expand_dims(image, 0)
-  return image
-
-def plot_confusion_matrix(cm, class_names):
-  """
-  Returns a matplotlib figure containing the plotted confusion matrix.
-
-  Args:
-    cm (array, shape = [n, n]): a confusion matrix of integer classes
-    class_names (array, shape = [n]): String names of the integer classes
-  """
-  figure = plt.figure(figsize=(8, 8))
-  plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-  plt.title("Confusion matrix")
-  plt.colorbar()
-  tick_marks = np.arange(len(class_names))
-  plt.xticks(tick_marks, class_names, rotation=45)
-  plt.yticks(tick_marks, class_names)
-
-  # Compute the labels from the normalized confusion matrix.
-  labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
-
-  # Use white text if squares are dark; otherwise black.
-  threshold = cm.max() / 2.
-  for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-    color = "white" if cm[i, j] > threshold else "black"
-    plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
-
-  plt.tight_layout()
-  plt.ylabel('True label')
-  plt.xlabel('Predicted label')
-  return figure
-
-def log_confusion_matrix(epoch, logs):
-  # Use the model to predict the values from the validation dataset.
-  test_pred_raw = model.predict(test_images)
-  test_pred = np.argmax(test_pred_raw, axis=1)
-
-  # Calculate the confusion matrix.
-  cm = sklearn.metrics.confusion_matrix(test_labels, test_pred)
-  # Log the confusion matrix as an image summary.
-  figure = plot_confusion_matrix(cm, class_names=class_names)
-  cm_image = plot_to_image(figure)
-
-  # Log the confusion matrix as an image summary.
-  with file_writer_cm.as_default():
-    tf.summary.image("Confusion Matrix", cm_image, step=epoch)
-
-# Define the per-epoch callback.
+#def plot_to_image(figure):
+#  """Converts the matplotlib plot specified by 'figure' to a PNG image and
+#  returns it. The supplied figure is closed and inaccessible after this call."""
+#  # Save the plot to a PNG in memory.
+#  buf = io.BytesIO()
+#  plt.savefig(buf, format='png')
+#  # Closing the figure prevents it from being displayed directly inside
+#  # the notebook.
+#  plt.close(figure)
+#  buf.seek(0)
+#  # Convert PNG buffer to TF image
+#  image = tf.image.decode_png(buf.getvalue(), channels=4)
+#  # Add the batch dimension
+#  image = tf.expand_dims(image, 0)
+#  return image
+#
+#def plot_confusion_matrix(cm, class_names):
+#  """
+#  Returns a matplotlib figure containing the plotted confusion matrix.
+#
+#  Args:
+#    cm (array, shape = [n, n]): a confusion matrix of integer classes
+#    class_names (array, shape = [n]): String names of the integer classes
+#  """
+#  figure = plt.figure(figsize=(8, 8))
+#  plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+#  plt.title("Confusion matrix")
+#  plt.colorbar()
+#  tick_marks = np.arange(len(class_names))
+#  plt.xticks(tick_marks, class_names, rotation=45)
+#  plt.yticks(tick_marks, class_names)
+#
+#  # Compute the labels from the normalized confusion matrix.
+#  labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
+#
+#  # Use white text if squares are dark; otherwise black.
+#  threshold = cm.max() / 2.
+#  for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+#    color = "white" if cm[i, j] > threshold else "black"
+#    plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
+#
+#  plt.tight_layout()
+#  plt.ylabel('True label')
+#  plt.xlabel('Predicted label')
+#  return figure
+#
+#def log_confusion_matrix(epoch, logs):
+#  # Use the model to predict the values from the validation dataset.
+#  test_pred_raw = model.predict(test_images)
+#  test_pred = np.argmax(test_pred_raw, axis=1)
+#
+#  # Calculate the confusion matrix.
+#  cm = sklearn.metrics.confusion_matrix(test_labels, test_pred)
+#  # Log the confusion matrix as an image summary.
+#  figure = plot_confusion_matrix(cm, class_names=class_names)
+#  cm_image = plot_to_image(figure)
+#
+#  # Log the confusion matrix as an image summary.
+#  with file_writer_cm.as_default():
+#    tf.summary.image("Confusion Matrix", cm_image, step=epoch)
+#
+## Define the per-epoch callback.
 #cm_callback = keras.callbacks.LambdaCallback(on_epoch_end=log_confusion_matrix)
+#
+#class ComputeConfusionMatrix(tf.keras.callbacks.Callback):
+#    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
+#
+#  Arguments:
+#      patience: Number of epochs to wait after min has been hit. After this
+#      number of no improvement, training stops.
+#  """
+#    def __init__(self, val_ds, writer, iters=cfg.STEPS_PER_EPOCH_VAL):
+#        super(Compute_mAP, self).__init__()
+#        self.val_ds = val_ds
+#        self.iters = iters
+#        self.writer = writer
+#
+#    def on_epoch_end(self, epoch, logs=None):
+#        AP_list = []
+#        for data in self.val_ds.take(self.iters):
+#            image, gt_masks, gt_bboxes = data
+#            gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+#            data = image, gt_masks, gt_bboxes
+#            rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask = self.model.infer(image)
+#            box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
+#            box = tf.round(box*cfg.TRAIN_SIZE)
+#            mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+#
+#        for key in keys:
+#            ap = []
+#            for AP in AP_list:
+#                ap.append(AP[key])
+#            with self.writer.as_default():
+#                tf.summary.scalar(key, np.array(ap).mean(), step=epoch)
+#
+
+class Compute_mAP(tf.keras.callbacks.Callback):
+    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
+
+  Arguments:
+      patience: Number of epochs to wait after min has been hit. After this
+      number of no improvement, training stops.
+  """
+    def __init__(self, val_ds, writer, iters=cfg.STEPS_PER_EPOCH_VAL):
+        super(Compute_mAP, self).__init__()
+        self.val_ds = val_ds
+        self.iters = iters
+        self.writer = writer
+
+    def on_epoch_end(self, epoch, logs=None):
+        AP_list = []
+        for data in self.val_ds.take(self.iters):
+            image, gt_masks, gt_bboxes = data
+            gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+            data = image, gt_masks, gt_bboxes
+            rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask = self.model.infer(image)
+            box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
+            box = tf.round(box*cfg.TRAIN_SIZE)
+            mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+            predictions = box, conf, class_id, mask
+            AP = compute_mAP(data, predictions)
+            AP_list += AP
+        iou_thresholds = np.arange(0.5, 1.0, 0.05)
+        keys = ["AP @{:.2f}".format(iou_threshold) for iou_threshold in iou_thresholds]
+        keys += ["AP @{:.2f}-{:.2f}".format(iou_thresholds[0], iou_thresholds[-1])]
+        for key in keys:
+            ap = []
+            for AP in AP_list:
+                ap.append(AP[key])
+            with self.writer.as_default():
+                tf.summary.scalar(key, np.array(ap).mean(), step=epoch)

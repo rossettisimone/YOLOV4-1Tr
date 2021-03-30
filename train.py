@@ -14,7 +14,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from loader_ytvos import DataLoader 
 from model import get_model
-from utils import  FreezeBackbone, EarlyStoppingRPN, fine_tuning, folders
+from utils import  FreezeBackbone, EarlyStoppingRPN, fine_tuning, folders, Compute_mAP
 # tf.config.optimizer.set_jit(True)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -48,10 +48,12 @@ with strategy.scope():
     model = get_model()
     model.compile(optimizer)
 
+compute_map = Compute_mAP(val_ds = val_dataset, writer = writer)
+
 train_history = model.fit(train_dataset, epochs = cfg.FINE_TUNING, steps_per_epoch = cfg.STEPS_PER_EPOCH_TRAIN, \
                       validation_data = val_dataset, validation_steps = cfg.STEPS_PER_EPOCH_VAL,\
                       validation_freq = 1, max_queue_size = GLOBAL_BATCH * 10,
-                      callbacks = [callbacks, checkpoint], use_multiprocessing = True, workers = 24)
+                      callbacks = [callbacks, checkpoint, compute_map], use_multiprocessing = True, workers = 24)
 
 model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
 
