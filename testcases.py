@@ -43,25 +43,30 @@ def test_preprocess_mrcnn():
     proposals = tf.concat([proposals, bad_proposals], axis=1)
     gt_bboxes_1 = tf.random.uniform((2,5,2))*0.5
     gt_bboxes_2 = tf.random.uniform((2,5,2))*0.5 + 0.5
-    gt_class_ids = tf.round(tf.random.uniform((2,5,1),1,41))
+    gt_class_ids = tf.round(tf.random.uniform((2,5,1),1,40))
     gt_bboxes = tf.concat([gt_bboxes_1, gt_bboxes_2], axis=-1)* cfg.TRAIN_SIZE
     gt_bboxes = tf.concat([gt_bboxes, gt_class_ids], axis=-1)
     gt_masks = tf.round(tf.random.uniform((2,5,28,28)))
 #    proposals = tf.zeros((2,20,4))
 #    gt_bboxes = tf.zeros((2,10,4))
 #    gt_masks = tf.zeros((2,10,28,28))
-    target_class_ids, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks)
+#    gt_class_ids = tf.ones((2,10,1))
+#    gt_bboxes = tf.concat([gt_bboxes, gt_class_ids], axis=-1)
+    target_class_ids, target_bboxes, target_masks = preprocess_mrcnn(proposals, gt_bboxes, gt_masks)
     
-    return target_class_ids, target_masks
+    return target_class_ids, target_bboxes, target_masks
 
 def test_loss_mrcnn():
-    from model import mask_loss_graph
+    from model import mask_loss_graph, class_loss_graph, bbox_loss_graph
     import config as cfg
-    target_class_ids, target_masks = test_preprocess_mrcnn()
+    target_class_ids, target_bboxes, target_masks = test_preprocess_mrcnn()
     pred_masks = tf.concat([(((target_masks-1)*-2)-1)[...,None],((target_masks*2)-1)[...,None]],axis=-1)*100
-    loss = mask_loss_graph(target_masks, target_class_ids, pred_masks)
-    
-    assert tf.equal(loss, 0)
+    pred_class = tf.one_hot(target_class_ids,40)*100
+    pred_bbox = target_bboxes
+    mrcnn_class_loss = class_loss_graph(target_class_ids, pred_class)
+    mrcnn_box_loss = bbox_loss_graph(target_bboxes, target_class_ids, pred_bbox)
+    mrcnn_mask_loss = mask_loss_graph(target_masks, target_class_ids, pred_masks)
+    assert tf.equal(mrcnn_class_loss+mrcnn_box_loss+mrcnn_mask_loss, 0)
     
 def test_encode_decode():
     from loader_avakin import DataLoader

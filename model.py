@@ -21,7 +21,7 @@ class Model(tf.keras.Model):
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_loss, box_loss, conf_loss, class_loss, rbox_loss, mask_loss = train_step(self, data, self.optimizer)
         return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss, "class_loss": class_loss, "rbox_loss": rbox_loss, \
-                "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_mc":self.s_mc, "s_mr":self.s_mr, "s_m":self.s_mm }
+                "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_mc":self.s_mc, "s_mr":self.s_mr, "s_mm":self.s_mm }
     
     def test_step(self, data):
         image, gt_masks, gt_bboxes = data
@@ -29,7 +29,7 @@ class Model(tf.keras.Model):
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
         alb_loss, box_loss, conf_loss, class_loss, rbox_loss, mask_loss = val_step(self, data)
         return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss, "class_loss": class_loss, "rbox_loss": rbox_loss,  \
-                "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_mc":self.s_mc, "s_mr":self.s_mr, "s_m":self.s_mm }
+                "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_mc":self.s_mc, "s_mr":self.s_mr, "s_mm":self.s_mm }
     
 def get_model(pretrained_backbone=True, infer=False):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
@@ -179,18 +179,31 @@ def class_loss_graph(target_class_ids, pred_class_logits):
     #       images in a batch have the same active_class_ids
     
 #    pred_active = tf.gather(active_class_ids[0], pred_class_ids)
-
+    target_class_ids = tf.cast(target_class_ids, tf.int32)
+    
+    target_class_ids = tf.reshape(target_class_ids, (-1,))
+    
+    pred_class_logits = tf.reshape(pred_class_logits, (-1,tf.shape(pred_class_logits)[-1]))
+    
     # # Loss
-    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=target_class_ids, logits=pred_class_logits)
-
+    positive_roi_ix = tf.where(target_class_ids > 0)[:, 0]
+    
+    target_class_ids = tf.gather(target_class_ids, positive_roi_ix, axis=0)
+    
+    target_class_ids = tf.subtract(target_class_ids, tf.constant(1,tf.int32))
+    
+    pred_class_logits = tf.gather(pred_class_logits, positive_roi_ix, axis=0)
+    
+    loss = tf.cond(tf.greater(tf.size(target_class_ids), 0),\
+                   lambda: tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class_ids, logits=pred_class_logits),\
+                   lambda: tf.constant(0.0))
+    loss = tf.reduce_mean(loss)
     # Erase losses of predictions of classes that are not in the active
     # classes of the image.
 #    loss = loss * pred_active
 
     # Computer loss mean. Use only predictions that contribute
     # to the loss to get a correct mean.
-    loss = tf.reduce_mean(loss) #/ tf.reduce_sum(pred_active)
     return loss
 
 

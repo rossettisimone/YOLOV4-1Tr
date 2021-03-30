@@ -420,7 +420,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     target = tf.cast(target, tf.float32)
     gt_boxes = target[:,:4]/cfg.TRAIN_SIZE
     # encode from 0 to num_class-1
-    ids = tf.math.subtract(target[:,4],1.0)
+    ids = tf.subtract(target[:,4],1.0)
     
     gt_boxes = tf.clip_by_value(gt_boxes, 0.0, 1.0)
     gt_boxes = xyxy2xywh(gt_boxes)
