@@ -16,6 +16,10 @@ import skimage.transform
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from skimage.color import hsv2rgb, rgb2hsv
+import sklearn.metrics
+import matplotlib.pyplot as plt
+import itertools
+import io
 ###############################################################################################
 ####################################   PREPROCESSING   ########################################
 ###############################################################################################
@@ -396,7 +400,13 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
     b2_area = tf.broadcast_to(tf.reshape((b2_x2 - b2_x1) * (b2_y2 - b2_y1),(1,-1)),[N,M])
 
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
-#
+
+
+def bbox_iou_batch(inputs):
+    box1, box2 = inputs
+    iou = bbox_iou(box1, box2, True)
+    return iou
+
 def xyxy2xywh(xyxy):
     # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
     # x, y are coordinates of center 
@@ -648,7 +658,7 @@ def nms_proposals_tensor(proposal):
     boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
             boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
             max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
-    category+=1.
+    category = tf.add(category, 1.) # from [0, num_classes-1] to [1, num_classes]
     proposal = tf.concat([boxes,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
     return proposal
 
@@ -923,39 +933,39 @@ class EarlyStoppingRPN(tf.keras.callbacks.Callback):
         if self.stopped_epoch > 0:
             print("Epoch %05d: early stopping" % (self.stopped_epoch + 1))
 
-#def plot_to_image(figure):
-#  """Converts the matplotlib plot specified by 'figure' to a PNG image and
-#  returns it. The supplied figure is closed and inaccessible after this call."""
-#  # Save the plot to a PNG in memory.
-#  buf = io.BytesIO()
-#  plt.savefig(buf, format='png')
-#  # Closing the figure prevents it from being displayed directly inside
-#  # the notebook.
-#  plt.close(figure)
-#  buf.seek(0)
-#  # Convert PNG buffer to TF image
-#  image = tf.image.decode_png(buf.getvalue(), channels=4)
-#  # Add the batch dimension
-#  image = tf.expand_dims(image, 0)
-#  return image
-#
-#def plot_confusion_matrix(cm, class_names):
-#  """
-#  Returns a matplotlib figure containing the plotted confusion matrix.
-#
-#  Args:
-#    cm (array, shape = [n, n]): a confusion matrix of integer classes
-#    class_names (array, shape = [n]): String names of the integer classes
-#  """
-#  figure = plt.figure(figsize=(8, 8))
-#  plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-#  plt.title("Confusion matrix")
-#  plt.colorbar()
-#  tick_marks = np.arange(len(class_names))
-#  plt.xticks(tick_marks, class_names, rotation=45)
-#  plt.yticks(tick_marks, class_names)
-#
-#  # Compute the labels from the normalized confusion matrix.
+def plot_to_image(figure):
+  """Converts the matplotlib plot specified by 'figure' to a PNG image and
+  returns it. The supplied figure is closed and inaccessible after this call."""
+  # Save the plot to a PNG in memory.
+  buf = io.BytesIO()
+  plt.savefig(buf, format='png')
+  # Closing the figure prevents it from being displayed directly inside
+  # the notebook.
+  plt.close(figure)
+  buf.seek(0)
+  # Convert PNG buffer to TF image
+  image = tf.image.decode_png(buf.getvalue(), channels=4)
+  # Add the batch dimension
+  image = tf.expand_dims(image, 0)
+  return image
+
+def plot_confusion_matrix(cm, class_names):
+  """
+  Returns a matplotlib figure containing the plotted confusion matrix.
+
+  Args:
+    cm (array, shape = [n, n]): a confusion matrix of integer classes
+    class_names (array, shape = [n]): String names of the integer classes
+  """
+  figure = plt.figure(figsize=(16, 16))
+  plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+  plt.title("Confusion matrix")
+  plt.colorbar()
+  tick_marks = np.arange(len(class_names))
+  plt.xticks(tick_marks, class_names, rotation=45)
+  plt.yticks(tick_marks, class_names)
+
+  # Compute the labels from the normalized confusion matrix.
 #  labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
 #
 #  # Use white text if squares are dark; otherwise black.
@@ -963,68 +973,69 @@ class EarlyStoppingRPN(tf.keras.callbacks.Callback):
 #  for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
 #    color = "white" if cm[i, j] > threshold else "black"
 #    plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
-#
-#  plt.tight_layout()
-#  plt.ylabel('True label')
-#  plt.xlabel('Predicted label')
-#  return figure
-#
-#def log_confusion_matrix(epoch, logs):
-#  # Use the model to predict the values from the validation dataset.
-#  test_pred_raw = model.predict(test_images)
-#  test_pred = np.argmax(test_pred_raw, axis=1)
-#
-#  # Calculate the confusion matrix.
-#  cm = sklearn.metrics.confusion_matrix(test_labels, test_pred)
-#  # Log the confusion matrix as an image summary.
-#  figure = plot_confusion_matrix(cm, class_names=class_names)
-#  cm_image = plot_to_image(figure)
-#
-#  # Log the confusion matrix as an image summary.
-#  with file_writer_cm.as_default():
-#    tf.summary.image("Confusion Matrix", cm_image, step=epoch)
-#
-## Define the per-epoch callback.
-#cm_callback = keras.callbacks.LambdaCallback(on_epoch_end=log_confusion_matrix)
-#
-#class ComputeConfusionMatrix(tf.keras.callbacks.Callback):
-#    """Stop training when the loss is at its min, i.e. the loss stops decreasing.
-#
-#  Arguments:
-#      patience: Number of epochs to wait after min has been hit. After this
-#      number of no improvement, training stops.
-#  """
-#    def __init__(self, val_ds, writer, iters=cfg.STEPS_PER_EPOCH_VAL):
-#        super(Compute_mAP, self).__init__()
-#        self.val_ds = val_ds
-#        self.iters = iters
-#        self.writer = writer
-#
-#    def on_epoch_end(self, epoch, logs=None):
-#        AP_list = []
-#        for data in self.val_ds.take(self.iters):
-#            image, gt_masks, gt_bboxes = data
-#            gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
-#            data = image, gt_masks, gt_bboxes
-#            rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask = self.model.infer(image)
-#            box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
-#            box = tf.round(box*cfg.TRAIN_SIZE)
-#            mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
-#
-#        for key in keys:
-#            ap = []
-#            for AP in AP_list:
-#                ap.append(AP[key])
-#            with self.writer.as_default():
-#                tf.summary.scalar(key, np.array(ap).mean(), step=epoch)
-#
 
-class Compute_mAP(tf.keras.callbacks.Callback):
+  plt.tight_layout()
+  plt.ylabel('True label')
+  plt.xlabel('Predicted label')
+  return figure
+
+class ComputeConfusionMatrix(tf.keras.callbacks.Callback):
     """Stop training when the loss is at its min, i.e. the loss stops decreasing.
 
   Arguments:
       patience: Number of epochs to wait after min has been hit. After this
       number of no improvement, training stops.
+  """
+    def __init__(self, val_ds, class_names_list, writer, iters=cfg.STEPS_PER_EPOCH_VAL):
+        super(ComputeConfusionMatrix, self).__init__()
+        self.val_ds = val_ds
+        self.class_names_list = class_names_list
+        self.iters = iters
+        self.writer = writer
+
+    def on_epoch_end(self, epoch, logs=None):
+        predictions = []
+        labels = []
+        for data in self.val_ds.take(self.iter):
+            image, _, gt_bboxes = data
+            gt_class_id = gt_bboxes[...,4]
+            gt_box = gt_bboxes[...,:4]
+            _, _, rpn_proposals, _ = self.model.infer(image)
+            box, class_id = rpn_proposals[...,:4], rpn_proposals[...,5]
+            box = tf.round(box*cfg.TRAIN_SIZE)
+            gt_intersect = tf.map_fn(bbox_iou_batch, (box,gt_box), fn_output_signature=tf.float32)
+            target_indices = tf.math.argmax(gt_intersect,axis=-1)
+            # Determine positive and negative ROIs
+            valid_indices = tf.reduce_max(gt_intersect, axis=-1)
+            valid_indices = tf.cast(valid_indices >= cfg.IOU_THRESH, tf.int64) # there is bbox
+            gt_class_id = tf.cast(gt_class_id,  tf.int64)
+            gt_class_id = tf.gather(gt_class_id, target_indices,axis=-1,batch_dims=-1)
+            target_class_ids = valid_indices * tf.cast(gt_class_id,  tf.int64)
+            pred_class_ids = valid_indices * tf.cast(class_id,  tf.int64)
+            target_class_ids = tf.reshape(target_class_ids,(-1))
+            pred_class_ids = tf.reshape(pred_class_ids,(-1))
+            indices = tf.reshape(tf.where(tf.greater(target_class_ids,0)),(-1))
+            target_class_ids = tf.gather(target_class_ids, indices)
+            pred_class_ids = tf.gather(pred_class_ids, indices)
+            labels.append(target_class_ids)
+            predictions.append(pred_class_ids)
+        labels = tf.concat(labels,axis=0)
+        predictions = tf.concat(predictions,axis=0)
+        # Calculate the confusion matrix.
+        cm = sklearn.metrics.confusion_matrix(labels, predictions)
+        # Log the confusion matrix as an image summary.
+        figure = plot_confusion_matrix(cm, class_names=self.class_names_list)
+        cm_image = plot_to_image(figure)
+        with self.writer.as_default():
+            tf.summary.image("Confusion Matrix", cm_image, step=epoch)
+            
+class Compute_mAP(tf.keras.callbacks.Callback):
+    """compute confusion matrix and mean AP according to coco api
+
+  Arguments:
+      val_ds: validation dataset
+      iters: num of iterations
+      writer: default writer
   """
     def __init__(self, val_ds, writer, iters=cfg.STEPS_PER_EPOCH_VAL):
         super(Compute_mAP, self).__init__()
@@ -1045,6 +1056,7 @@ class Compute_mAP(tf.keras.callbacks.Callback):
             predictions = box, conf, class_id, mask
             AP = compute_mAP(data, predictions)
             AP_list += AP
+            
         iou_thresholds = np.arange(0.5, 1.0, 0.05)
         keys = ["AP @{:.2f}".format(iou_threshold) for iou_threshold in iou_thresholds]
         keys += ["AP @{:.2f}-{:.2f}".format(iou_thresholds[0], iou_thresholds[-1])]
@@ -1054,3 +1066,73 @@ class Compute_mAP(tf.keras.callbacks.Callback):
                 ap.append(AP[key])
             with self.writer.as_default():
                 tf.summary.scalar(key, np.array(ap).mean(), step=epoch)
+        
+class ComputeConfusionMatrix_and_mAP(tf.keras.callbacks.Callback):
+    """compute confusion matrix and mean AP according to coco api
+
+  Arguments:
+      val_ds: validation dataset
+      iters: num of iterations
+      writer: default writer
+  """
+    def __init__(self, val_ds, class_names_list, writer, iters=cfg.STEPS_PER_EPOCH_VAL):
+        super(ComputeConfusionMatrix_and_mAP, self).__init__()
+        self.val_ds = val_ds
+        self.class_names_list = class_names_list
+        self.iters = iters
+        self.writer = writer
+
+    def on_epoch_end(self, epoch, logs=None):
+        AP_list = []
+        preds = []
+        labels = []
+        for data in self.val_ds.take(self.iters):
+            image, gt_masks, gt_bboxes = data
+            gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+            data = image, gt_masks, gt_bboxes
+            rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask = self.model.infer(image)
+            box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
+            box = tf.round(box*cfg.TRAIN_SIZE)
+            mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+            predictions = box, conf, class_id, mask
+            AP = compute_mAP(data, predictions)
+            AP_list += AP
+            
+            gt_class_id = gt_bboxes[...,4]
+            gt_box = gt_bboxes[...,:4]
+            gt_intersect = tf.map_fn(bbox_iou_batch, (box,gt_box), fn_output_signature=tf.float32)
+            target_indices = tf.math.argmax(gt_intersect,axis=-1)
+            # Determine positive and negative ROIs
+            valid_indices = tf.reduce_max(gt_intersect, axis=-1)
+            valid_indices = tf.cast(valid_indices >= cfg.IOU_THRESH, tf.int64) # there is bbox
+            gt_class_id = tf.cast(gt_class_id,  tf.int64)
+            gt_class_id = tf.gather(gt_class_id, target_indices,axis=-1,batch_dims=-1)
+            target_class_ids = valid_indices * tf.cast(gt_class_id,  tf.int64)
+            pred_class_ids = valid_indices * tf.cast(class_id,  tf.int64)
+            target_class_ids = tf.reshape(target_class_ids,(-1))
+            pred_class_ids = tf.reshape(pred_class_ids,(-1))
+            indices = tf.reshape(tf.where(tf.greater(target_class_ids,0)),(-1))
+            target_class_ids = tf.gather(target_class_ids, indices)
+            pred_class_ids = tf.gather(pred_class_ids, indices)
+            labels.append(target_class_ids)
+            preds.append(pred_class_ids)
+            
+        iou_thresholds = np.arange(0.5, 1.0, 0.05)
+        keys = ["AP @{:.2f}".format(iou_threshold) for iou_threshold in iou_thresholds]
+        keys += ["AP @{:.2f}-{:.2f}".format(iou_thresholds[0], iou_thresholds[-1])]
+        for key in keys:
+            ap = []
+            for AP in AP_list:
+                ap.append(AP[key])
+            with self.writer.as_default():
+                tf.summary.scalar(key, np.array(ap).mean(), step=epoch)
+                
+        labels = tf.concat(labels,axis=0)
+        preds = tf.concat(preds,axis=0)
+        # Calculate the confusion matrix.
+        cm = sklearn.metrics.confusion_matrix(labels, preds)
+        # Log the confusion matrix as an image summary.
+        figure = plot_confusion_matrix(cm, class_names=self.class_names_list)
+        cm_image = plot_to_image(figure)
+        with self.writer.as_default():
+            tf.summary.image("Confusion Matrix", cm_image, step=epoch)

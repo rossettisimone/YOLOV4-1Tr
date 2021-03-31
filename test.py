@@ -134,7 +134,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/2021-03-30-18-16-39/weights/model.03--5.664.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.11--6.231.h5')
 
 model.trainable = False
 
@@ -272,7 +272,7 @@ from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, c
 
 
 ds = DataLoader(shuffle=True, augment=False)
-iterator = ds.train_ds.unbatch().batch(8).__iter__()
+iterator = ds.train_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
 AP = 0
@@ -285,9 +285,8 @@ predictions = model.infer(image)
 box, conf, class_id, mask = predictions
 label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-data2 = image, gt_masks, gt_bboxes
-#show_infer(data_, predictions, ds.class_dict)
-AP = compute_mAP(data2, predictions)
+show_infer(data_, predictions, ds.class_dict)
+AP = show_mAP(data_, predictions)
 print(AP)
 gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
 draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
