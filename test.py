@@ -275,9 +275,6 @@ ds = DataLoader(shuffle=True, augment=False)
 iterator = ds.train_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
-AP = 0
-#for i in range(1):
-
 data = iterator.next()
 image, gt_masks, gt_bboxes = data
 gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
