@@ -26,7 +26,7 @@ writer.set_as_default()
 
 callbacks = tf.keras.callbacks.TensorBoard(
                                 log_dir=logdir, histogram_freq=1, write_graph=True,
-                                write_images=True, update_freq='batch', profile_batch='2, 4',
+                                write_images=False, update_freq='batch', profile_batch='2, 4',
                                 embeddings_freq=1, embeddings_metadata=None)
 
 checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=filepath, save_weights_only=True,
