@@ -665,7 +665,7 @@ def nms_proposals_tensor(proposal):
 def nms_proposals(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = proposal[..., 4] 
+   pconf = proposal[..., 4] * tf.reduce_max(proposal[...,5:], axis=-1)
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
@@ -1001,8 +1001,11 @@ class ComputeConfusionMatrix(tf.keras.callbacks.Callback):
             gt_class_id = gt_bboxes[...,4]
             gt_box = gt_bboxes[...,:4]
             _, _, rpn_proposals, _ = self.model.infer(image)
-            box, class_id = rpn_proposals[...,:4], rpn_proposals[...,5]
+            box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
             box = tf.round(box*cfg.TRAIN_SIZE)
+            gate = tf.cast(conf>=0.5,tf.float32)
+            box = box * tf.tile(gate[...,None],(1,1,4))
+            class_id = class_id * gate
             gt_intersect = tf.map_fn(bbox_iou_batch, (box,gt_box), fn_output_signature=tf.float32)
             target_indices = tf.math.argmax(gt_intersect,axis=-1)
             # Determine positive and negative ROIs
@@ -1014,7 +1017,12 @@ class ComputeConfusionMatrix(tf.keras.callbacks.Callback):
             pred_class_ids = valid_indices * tf.cast(class_id,  tf.int64)
             target_class_ids = tf.reshape(target_class_ids,(-1))
             pred_class_ids = tf.reshape(pred_class_ids,(-1))
+            # remove zero padded bboxes
             indices = tf.reshape(tf.where(tf.greater(target_class_ids,0)),(-1))
+            target_class_ids = tf.gather(target_class_ids, indices)
+            pred_class_ids = tf.gather(pred_class_ids, indices)
+            # remove zero padded predictions (low conf)
+            indices = tf.reshape(tf.where(tf.greater(pred_class_ids,0)),(-1))
             target_class_ids = tf.gather(target_class_ids, indices)
             pred_class_ids = tf.gather(pred_class_ids, indices)
             labels.append(target_class_ids)
@@ -1098,6 +1106,9 @@ class ComputeConfusionMatrix_and_mAP(tf.keras.callbacks.Callback):
             AP = compute_mAP(data, predictions)
             AP_list += AP
             
+            gate = tf.cast(conf>=0.5,tf.float32)
+            box = box * tf.tile(gate[...,None],(1,1,4))
+            class_id = class_id * gate
             gt_class_id = gt_bboxes[...,4]
             gt_box = gt_bboxes[...,:4]
             gt_intersect = tf.map_fn(bbox_iou_batch, (box,gt_box), fn_output_signature=tf.float32)
@@ -1111,7 +1122,12 @@ class ComputeConfusionMatrix_and_mAP(tf.keras.callbacks.Callback):
             pred_class_ids = valid_indices * tf.cast(class_id,  tf.int64)
             target_class_ids = tf.reshape(target_class_ids,(-1))
             pred_class_ids = tf.reshape(pred_class_ids,(-1))
+            # remove zero padded bboxes
             indices = tf.reshape(tf.where(tf.greater(target_class_ids,0)),(-1))
+            target_class_ids = tf.gather(target_class_ids, indices)
+            pred_class_ids = tf.gather(pred_class_ids, indices)
+            # remove zero padded predictions (low conf)
+            indices = tf.reshape(tf.where(tf.greater(pred_class_ids,0)),(-1))
             target_class_ids = tf.gather(target_class_ids, indices)
             pred_class_ids = tf.gather(pred_class_ids, indices)
             labels.append(target_class_ids)
