@@ -134,7 +134,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.11--6.231.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.30--6.501.h5')
 
 model.trainable = False
 
@@ -217,42 +217,43 @@ for i in range(0,7):
             subsubpath = os.path.join(subpath,'e_{}'.format(str(j+2)))
             os.makedirs(subsubpath,exist_ok=True)
             o=o[0]
+            for a in range(o.shape[0]):
+                subsubsubpath = os.path.join(subsubpath,'a_{}'.format(str(a+1)))
+                os.makedirs(subsubsubpath,exist_ok=True)
+                for c in range(o.shape[-1]):
+                    img = o[a,:,:,c].numpy()*255
+                    name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                    img = Image.fromarray(img)
+                    w,h = img.size
+                    img.convert("L").save(name)
+            print(os.path.join(subpath,'e_{}'.format(str(j+2))))
+    elif i==4:
+        subpath = os.path.join(path,'head_features')
+        os.makedirs(subpath,exist_ok=True)
+        for j,o in enumerate(output[i]):
+            o=o[0]
+            subsubpath = os.path.join(subpath,'f_{}'.format(str(j+2)))
+            os.makedirs(subsubpath,exist_ok=True)
             for c in range(o.shape[-1]):
                 img = o[:,:,c].numpy()*255
                 name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
                 img = Image.fromarray(img)
                 w,h = img.size
                 img.convert("L").save(name)
-            print(os.path.join(subpath,'e_{}'.format(str(j+2))))
-    elif i==5:
-        subpath = os.path.join(path,'rois_box_classification')
-        os.makedirs(subpath,exist_ok=True)
-        for j,o in enumerate(output[i]):
-            o=o[0]
-            for s in range(o.shape[0]):
-                subsubpath = os.path.join(subpath,'roi_{}'.format(str(s)))
-                os.makedirs(subsubpath,exist_ok=True)
-                for c in range(o.shape[-1]):
-                    img = o[s,:,:,c].numpy()*255
-                    name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
-                    img = Image.fromarray(img)
-                    w,h = img.size
-                    img.convert("L").save(name)
             print(os.path.join(subpath,'roi_class_{}'.format(str(j))))
-    elif i==6:
+    elif i==5:
         subpath = os.path.join(path,'rois_mask')
         os.makedirs(subpath,exist_ok=True)
         for j,o in enumerate(output[i]):
             o=o[0]
-            for s in range(o.shape[0]):
-                subsubpath = os.path.join(subpath,'roi_{}'.format(str(s)))
-                os.makedirs(subsubpath,exist_ok=True)
-                for c in range(o.shape[-1]):
-                    img = o[s,:,:,c].numpy()*255
-                    name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
-                    img = Image.fromarray(img)
-                    w,h = img.size
-                    img.convert("L").save(name)
+            subsubpath = os.path.join(subpath,'roi_{}'.format(str(j)))
+            os.makedirs(subsubpath,exist_ok=True)
+            for c in range(o.shape[-1]):
+                img = o[:,:,c].numpy()*255
+                name = os.path.join(subsubpath,'channel_{}.png'.format(str(c)))
+                img = Image.fromarray(img)
+                w,h = img.size
+                img.convert("L").save(name)
             print(os.path.join(subpath,'roi_mask_{}'.format(str(j))))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% DATASET DECODING TEST %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -280,10 +281,11 @@ image, gt_masks, gt_bboxes = data
 gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 predictions = model.infer(image)
 box, conf, class_id, mask = predictions
+#predictions = gt_bboxes, tf.ones((1,15)), tf.ones((1,15))*3, gt_masks
 label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
 show_infer(data_, predictions, ds.class_dict)
-AP = show_mAP(data_, predictions)
+AP = show_mAP(data_, predictions,verbose=1)
 print(AP)
 gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
 draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')

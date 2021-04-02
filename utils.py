@@ -596,8 +596,8 @@ def decode_prediction(prediction, embedding, anchors, stride):
     prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
     pconf = prediction[..., 4:6]  # class
     pconf = tf.nn.softmax(pconf, axis=-1)[...,1:] # class
-    pclass = embedding #prediction[..., 6:]  # class
-    pclass = tf.nn.softmax(pclass, axis=-1) # class
+#    pclass = embedding #prediction[..., 6:]  # class
+    pclass = tf.nn.softmax(embedding, axis=-1) # class
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
@@ -680,7 +680,8 @@ def nms_proposals(proposal):
 #   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
 #   pbbox = proposal[...,:4]
 #   pconf = proposal[...,4:5]
-#   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]+1.
+#   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]
+#   pclass = tf.add(pclass, 1.) # from [0, num_classes-1] to [1, num_classes]
 #   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  
 #   
 #   return proposal
