@@ -592,12 +592,12 @@ def decode_delta_map(delta_map, anchors):
     pred_map = tf.reshape(pred_list,(nB, nA, nGh, nGw, 4))
     return pred_map
     
-def decode_prediction(prediction, embedding, anchors, stride):
+def decode_prediction(prediction, anchors, stride):
     prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
     pconf = prediction[..., 4:6]  # class
     pconf = tf.nn.softmax(pconf, axis=-1)[...,1:] # class
-#    pclass = embedding #prediction[..., 6:]  # class
-    pclass = tf.nn.softmax(embedding, axis=-1) # class
+    pclass = prediction[..., 6:]  # class
+    pclass = tf.nn.softmax(pclass, axis=-1) # class
     pbox = prediction[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
@@ -609,6 +609,8 @@ def decode_prediction(prediction, embedding, anchors, stride):
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC])
     proposal = check_proposals_tensor(proposal)
+    proposal = nms_proposals(proposal)
+
     return proposal
 
 
@@ -635,7 +637,6 @@ def check_proposals_tensor(proposal):
     pconf = proposal[..., 4]
     indices = tf.argsort(pconf, axis=-1, direction='DESCENDING', stable=True)
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
-    proposal = nms_proposals(proposal)
 
     return proposal
 #    
@@ -1058,7 +1059,7 @@ class Compute_mAP(tf.keras.callbacks.Callback):
             image, gt_masks, gt_bboxes = data
             gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
             data = image, gt_masks, gt_bboxes
-            rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask = self.model.infer(image)
+            rpn_predictions, rpn_proposals, mrcnn_mask = self.model.infer(image)
             box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
             box = tf.round(box*cfg.TRAIN_SIZE)
             mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
@@ -1099,7 +1100,7 @@ class ComputeConfusionMatrix_and_mAP(tf.keras.callbacks.Callback):
             image, gt_masks, gt_bboxes = data
             gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
             data = image, gt_masks, gt_bboxes
-            rpn_predictions, rpn_embeddings, rpn_proposals, mrcnn_mask = self.model.infer(image)
+            rpn_predictions, rpn_proposals, mrcnn_mask = self.model.infer(image)
             box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
             box = tf.round(box*cfg.TRAIN_SIZE)
             mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
