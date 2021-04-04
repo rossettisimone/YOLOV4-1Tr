@@ -209,28 +209,16 @@ def yolov4_plus1_decode_graph(input_layer):
                                       cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
                                       PRED_CH]), perm = [0, 3, 1, 2, 4])
     # CLASSIFICATION
-    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_2)
-    c_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
-                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+    c_2 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_2)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_2 = tf.concat([p_2,c_2],axis=-1)
     
-    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_3)
-    c_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
-                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+    c_3 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_3)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_3 = tf.concat([p_3,c_3],axis=-1)
-    
-    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_4)
-    c_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
-                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+
+    c_4 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_4)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_4 = tf.concat([p_4,c_4],axis=-1)
-    
-    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_5)
-    c_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
-                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
-                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+
+    c_5 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_5)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_5 = tf.concat([p_5,c_5],axis=-1)
     
     return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
