@@ -444,6 +444,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     target = tf.gather(target, non_zero_entry,axis=0)
     target = tf.cast(target, tf.float32)
     gt_boxes = target[:,:4]/cfg.TRAIN_SIZE
+    nGt = tf.shape(gt_boxes)[0]
     # encode from 0 to num_class-1
     ids = tf.math.subtract(target[:,4],1.0)
     
@@ -462,12 +463,28 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     iou_max = tf.math.reduce_max(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
     max_gt_index = tf.math.argmax(iou_pdist, axis=1)# Shape (nA x nGh x nGw), both
      
-    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))     
+    iou_map = tf.reshape(iou_max, (nA, nGh, nGw))    
     gt_index_map = tf.reshape(max_gt_index,(nA, nGh, nGw))     
     
-    id_index = iou_map > cfg.ID_THRESH * tol
-    fg_index = iou_map > cfg.FG_THRESH * tol                                              
-    bg_index = iou_map < cfg.BG_THRESH * tol
+    iou_max_gt = tf.transpose(tf.reshape(iou_pdist, (nA, nGh, nGw, nGt)),(3,0,1,2))  # nGt x nA x nGh x nGw
+    indices = tf.map_fn(lambda x: tf.where(tf.equal(x,tf.reduce_max(x)),1.,0.),iou_max_gt,fn_output_signature=tf.float32)
+    
+    def map_1(x):
+        ind = tf.where(x>0)
+        if tf.shape(ind)[0]>0:
+            ind = tf.cast(tf.reduce_sum(ind,axis=0),tf.int64)//tf.cast(tf.shape(ind)[0], tf.int64)
+            x = tf.scatter_nd(ind[None], tf.constant([1.0]), (nGh, nGw))
+        return x 
+    
+    def map_0(x):
+        y = tf.map_fn(map_1, x, fn_output_signature=tf.float32)
+        return y
+            
+    point_mask = tf.cast(tf.reduce_max(tf.map_fn(map_0, indices, fn_output_signature=tf.float32),axis=0), tf.bool)
+    
+    id_index = tf.logical_and(iou_map > cfg.ID_THRESH * tol, point_mask)
+    fg_index = tf.logical_and(iou_map > cfg.FG_THRESH * tol, point_mask)                                     
+    bg_index = iou_map < cfg.BG_THRESH * tol 
     ign_index = tf.cast(tf.cast(tf.logical_not(fg_index),tf.float32) \
                         * tf.cast(tf.logical_not(bg_index),tf.float32),tf.bool)
     tconf = tf.where(fg_index, 1.0, tconf)

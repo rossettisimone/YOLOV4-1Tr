@@ -163,61 +163,77 @@ def yolov4_plus1_decode_graph(input_layer):
         p_4: [batch, num_anchors, train_size/stride[2], train_size/stride[2], bbox_dim+conf_dim]
         p_5: [batch, num_anchors, train_size/stride[3], train_size/stride[3], bbox_dim+conf_dim]
         
-        e_2: [batch, train_size/stride[0], train_size/stride[0], num_classes]
-        e_3: [batch, train_size/stride[1], train_size/stride[1], num_classes]
-        e_4: [batch, train_size/stride[2], train_size/stride[2], num_classes]
-        e_5: [batch, train_size/stride[3], train_size/stride[3], num_classes]
+        c_2: [batch, train_size/stride[0], train_size/stride[0], num_classes]
+        c_3: [batch, train_size/stride[1], train_size/stride[1], num_classes]
+        c_4: [batch, train_size/stride[2], train_size/stride[2], num_classes]
+        c_5: [batch, train_size/stride[3], train_size/stride[3], num_classes]
         
-        f_2: [batch, train_size/stride[0], train_size/stride[0], embedding_dim]
-        f_3: [batch, train_size/stride[1], train_size/stride[1], embedding_dim]
-        f_4: [batch, train_size/stride[2], train_size/stride[2], embedding_dim]
-        f_5: [batch, train_size/stride[3], train_size/stride[3], embedding_dim]
+        e_2: [batch, train_size/stride[0], train_size/stride[0], embedding_dim]
+        e_3: [batch, train_size/stride[1], train_size/stride[1], embedding_dim]
+        e_4: [batch, train_size/stride[2], train_size/stride[2], embedding_dim]
+        e_5: [batch, train_size/stride[3], train_size/stride[3], embedding_dim]
         
     """
     n_2, n_3, n_4, n_5 = input_layer
 
-    prediction_channels = cfg.BBOX_REG + cfg.BBOX_CONF #+ cfg.NUM_CLASSES
-    prediction_filters = cfg.NUM_ANCHORS * prediction_channels
-    classification_channels = cfg.NUM_ANCHORS * cfg.NUM_CLASSES
+    PRED_CH = cfg.BBOX_REG + cfg.BBOX_CONF #+ cfg.NUM_CLASSES
+    STACK_PRED_CH = cfg.NUM_ANCHORS * PRED_CH
+    STACK_CLASS_CH = cfg.NUM_ANCHORS * cfg.NUM_CLASSES
     
     # level 2
-    f_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
-    e_2 = tf.keras.layers.Dense(classification_channels)(n_2)
+    e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_2, kernel_size = 3, filters = 64)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    x = tf.concat([x,e_2],axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = STACK_PRED_CH, activate=False, bn=False)#24
     p_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
-                                      prediction_channels+cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+                                      PRED_CH]), perm = [0, 3, 1, 2, 4])
     # level 3
-    f_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
-    e_3 = tf.keras.layers.Dense(classification_channels)(n_3)
+    e_3 = Conv2D(n_3, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_3, kernel_size = 3, filters = 128)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    x = tf.concat([x,e_3],axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = STACK_PRED_CH, activate=False, bn=False)#24
     p_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
-                                      prediction_channels+cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+                                      PRED_CH]), perm = [0, 3, 1, 2, 4])
     # level 4
-    f_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
-    e_4 = tf.keras.layers.Dense(classification_channels)(n_4)
+    e_4 = Conv2D(n_4, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_4, kernel_size = 3, filters = 256)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    x = tf.concat([x,e_4],axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = STACK_PRED_CH, activate=False, bn=False)#24
     p_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
-                                      prediction_channels+cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+                                      PRED_CH]), perm = [0, 3, 1, 2, 4])
     # level 5
-    f_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
-    e_5 = tf.keras.layers.Dense(classification_channels)(n_5)  
+    e_5 = Conv2D(n_5, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)
     x = Conv2D(n_5, kernel_size = 3, filters = 512)
-    x = Conv2D(x, kernel_size = 1, filters = prediction_filters, activate=False, bn=False)#24
-    x = tf.concat([x,e_5],axis=-1)
+    x = Conv2D(x, kernel_size = 1, filters = STACK_PRED_CH, activate=False, bn=False)#24
     p_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
                                       cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
-                                      prediction_channels+cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+                                      PRED_CH]), perm = [0, 3, 1, 2, 4])
+    # CLASSIFICATION
+    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_2)
+    c_2 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[0], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[0], cfg.NUM_ANCHORS, \
+                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+    p_2 = tf.concat([p_2,c_2],axis=-1)
     
-    return [p_2,p_3,p_4,p_5], [f_2,f_3,f_4,f_5]
+    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_3)
+    c_3 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[1], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[1], cfg.NUM_ANCHORS, \
+                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+    p_3 = tf.concat([p_3,c_3],axis=-1)
+    
+    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_4)
+    c_4 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[2], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[2], cfg.NUM_ANCHORS, \
+                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+    p_4 = tf.concat([p_4,c_4],axis=-1)
+    
+    x = tf.keras.layers.Dense(STACK_CLASS_CH)(n_5)
+    c_5 = tf.transpose(tf.reshape(x, [tf.shape(x)[0], cfg.TRAIN_SIZE//cfg.STRIDES[3], \
+                                      cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
+                                      cfg.NUM_CLASSES]), perm = [0, 3, 1, 2, 4])
+    p_5 = tf.concat([p_5,c_5],axis=-1)
+    
+    return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
 
 ############################################################
 #  YOLOV4+1 proposals decode graph
@@ -271,7 +287,7 @@ def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , mask_conf=cfg.MASK_CO
         rois: [batch, num_rois, (x1, y1, x2, y2)] Proposal boxes in normalized
               coordinates.
         feature_maps: List of feature maps from different layers of the pyramid,
-                      [e_2, e_3, e_4, e_5]. Each has a different resolution.
+                      [c_2, e_3, e_4, e_5]. Each has a different resolution.
         image_meta: [batch, (meta data)] Image details. See compose_image_meta()
     Output: 
         Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, MASK_CONF]
