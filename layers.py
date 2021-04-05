@@ -178,7 +178,6 @@ def yolov4_plus1_decode_graph(input_layer):
 
     PRED_CH = cfg.BBOX_REG + cfg.BBOX_CONF #+ cfg.NUM_CLASSES
     STACK_PRED_CH = cfg.NUM_ANCHORS * PRED_CH
-    STACK_CLASS_CH = cfg.NUM_ANCHORS * cfg.NUM_CLASSES
     
     # level 2
     e_2 = Conv2D(n_2, kernel_size = 3, filters = cfg.EMB_DIM, activate=False, bn=False)

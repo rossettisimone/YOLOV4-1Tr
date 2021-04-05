@@ -278,7 +278,7 @@ def compute_mAP(data, prediction):
     boxes, confs, class_ids, masks = prediction
     for gt_mask, gt_bbox, box, conf, class_id, mask in zip(gt_masks, gt_bboxes, boxes, confs, class_ids, masks):
         gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_mask, gt_bbox)
-        pred_box, pred_score, pred_class_id, pred_mask = decode_mask(box, conf, class_id, mask,'keep')
+        pred_box, pred_score, pred_class_id, pred_mask = decode_mask(box, conf, class_id, mask,'cut')
         gt_mask = np.transpose(gt_mask,(1,2,0))
         pred_mask = np.transpose(pred_mask,(1,2,0))
         if len(gt_bbox)>0: # this is never the case but better to put
@@ -483,7 +483,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     point_mask = tf.cast(tf.reduce_max(tf.map_fn(map_0, indices, fn_output_signature=tf.float32),axis=0), tf.bool)
     
     id_index = tf.logical_and(iou_map > cfg.ID_THRESH * tol, point_mask)
-    fg_index = tf.logical_and(iou_map > cfg.FG_THRESH * tol, point_mask)                                     
+    fg_index = iou_map > cfg.FG_THRESH * tol                                    
     bg_index = iou_map < cfg.BG_THRESH * tol 
     ign_index = tf.cast(tf.cast(tf.logical_not(fg_index),tf.float32) \
                         * tf.cast(tf.logical_not(bg_index),tf.float32),tf.bool)
@@ -527,7 +527,7 @@ def decode_label(label, anchors, stride):
     proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
     
     proposal = check_proposals_tensor(proposal)
-    
+    proposal = nms_proposals(proposal)
     return proposal
 
 def decode_labels(predictions, embeddings = None):
@@ -657,21 +657,9 @@ def check_proposals_tensor(proposal):
 
     return proposal
 #    
-#def nms_proposals_tensor(proposal,size = cfg.MAX_PROP):
-#    """This function compute nms proposals without iterating over the batch """
-#    pconf = proposal[...,4:5]
-#    ppred = proposal[...,5:]
-#    pconf = pconf * ppred
-#    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
-#    proposal, conf, category, *_ = tf.image.combined_non_max_suppression(
-#            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
-#            max_total_size=size, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
-#    proposal = tf.concat([proposal,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
-#    return proposal
-
 def nms_proposals_tensor(proposal):
     """This function compute nms proposals without iterating over the batch """
-    pconf = proposal[...,4:5] * proposal[...,5:]
+    pconf = proposal[...,5:]
     pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
     boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
             boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
@@ -683,7 +671,7 @@ def nms_proposals_tensor(proposal):
 def nms_proposals(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = proposal[..., 4] * tf.reduce_max(proposal[...,5:], axis=-1)
+   pconf =  proposal[...,4] * tf.reduce_max(proposal[...,5:], axis=-1)
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
@@ -692,18 +680,18 @@ def nms_proposals(proposal):
 #def nms_proposals_tensor(proposal):
 #   # non max suppression
 #   pboxes = proposal[...,:4]
-#   pconf = proposal[..., 4]
+#   pconf = proposal[...,4] * tf.reduce_max(proposal[...,5:], axis=-1)
 #   indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 #
 #   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
 #   pbbox = proposal[...,:4]
-#   pconf = proposal[...,4:5]
+#   pconf = proposal[...,4:5] * tf.reduce_max(proposal[...,5:], axis=-1)[...,None]
 #   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]
 #   pclass = tf.add(pclass, 1.) # from [0, num_classes-1] to [1, num_classes]
 #   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  
 #   
 #   return proposal
-#
+##
 ## Non-max suppression
 #def nms(proposals):
 #    boxes, scores = proposals[...,:4], proposals[...,4]
@@ -1125,7 +1113,7 @@ class ComputeConfusionMatrix_and_mAP(tf.keras.callbacks.Callback):
             AP = compute_mAP(data, predictions)
             AP_list += AP
             
-            gate = tf.cast(conf>=0.5,tf.float32)
+            gate = tf.cast(conf>=cfg.CONF_THRESH,tf.float32)
             box = box * tf.tile(gate[...,None],(1,1,4))
             class_id = class_id * gate
             gt_class_id = gt_bboxes[...,4]
