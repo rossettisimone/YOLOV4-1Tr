@@ -58,8 +58,6 @@ train_history = model.fit(train_dataset, epochs = cfg.FINE_TUNING, steps_per_epo
                       callbacks = [callbacks, checkpoint, compute_confmatrix_and_map], \
                       use_multiprocessing = True, workers = 24)
 
-model.evaluate(val_dataset, batch_size = GLOBAL_BATCH, callbacks = [callbacks], steps = cfg.STEPS_PER_EPOCH_VAL)
-
 with strategy.scope():
     model.load_weights(filepath.format(epoch = cfg.FINE_TUNING,\
                                        val_alb_loss = train_history.history['val_alb_loss'][cfg.FINE_TUNING-1]))

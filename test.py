@@ -134,7 +134,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.15--8.100.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.21--5.720.h5')
 
 model.trainable = False
 
@@ -269,22 +269,25 @@ draw_bbox(image[0].numpy(), bboxs = proposals[0,:,:4].numpy()*cfg.TRAIN_SIZE, mo
 import matplotlib.pyplot as plt
 from loader_ytvos import DataLoader 
 #import time
-from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth
-
+from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth, unmold_mask_batch
+ 
 
 ds = DataLoader(shuffle=True, augment=False)
-iterator = ds.train_ds.unbatch().batch(1).__iter__()
+iterator = ds.val_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%
 data = iterator.next()
 image, gt_masks, gt_bboxes = data
-gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+#gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
 predictions = model.infer(image)
 box, conf, class_id, mask = predictions
+mask = unmold_mask_batch(mask, box)
+predictions = box, conf, class_id, mask 
+
 #predictions = gt_bboxes, tf.ones((1,15)), tf.ones((1,15))*3, gt_masks
 label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 data_ = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes
-show_infer(data_, predictions, ds.class_dict)
+show_infer(image, predictions, ds.class_dict)
 AP = show_mAP(data_, predictions,verbose=1)
 print(AP)
 gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])

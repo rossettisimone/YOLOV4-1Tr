@@ -117,6 +117,7 @@ def compute_matches(gt_boxes, gt_class_ids, gt_masks,
         sorted_ixs = np.argsort(overlaps[i])[::-1]
         # 2. Remove low scores
         low_score_idx = np.where(overlaps[i, sorted_ixs] < score_threshold)[0]
+
         if low_score_idx.size > 0:
             sorted_ixs = sorted_ixs[:low_score_idx[0]]
         # 3. Find the match
