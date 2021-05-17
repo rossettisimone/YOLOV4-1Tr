@@ -123,7 +123,8 @@ class DataLoader(object):
                 box=np.array([np.min(xx),np.min(yy),np.max(xx),np.max(yy)])
                 box=np.clip(box,0.0,1.0)
                 p_id = person['p_id']
-                box = np.array(np.r_[box,1]*np.array([width, height, width, height, p_id]), dtype = np.int32)
+                class_ = 1 # person
+                box = np.array(np.r_[box,1,1]*np.array([width, height, width, height, class_, p_id]), dtype = np.int32)
                 if box[2]>box[0] and box[3]>box[1]:
                     try:
                         path_mask = os.path.join(cfg.AVA_SEGMENTS_DATASET_PATH, v_id, frame_name+'_'+str(p_id)+'.png' )
@@ -139,7 +140,7 @@ class DataLoader(object):
             good_sample = True
         except: # image not found or no valid bboxes or not valid masks, use light tipe to speed up
             image = np.zeros((cfg.TRAIN_SIZE, cfg.TRAIN_SIZE, 3), dtype=np.uint8)
-            bboxes = np.zeros((cfg.MAX_INSTANCES,5), dtype=np.uint8) # bbox + pid
+            bboxes = np.zeros((cfg.MAX_INSTANCES,6), dtype=np.uint8) # bbox + pid
             masks = np.zeros((cfg.MAX_INSTANCES, cfg.TRAIN_SIZE, cfg.TRAIN_SIZE), dtype=np.uint8)
             good_sample = False
         return image, masks, bboxes, good_sample

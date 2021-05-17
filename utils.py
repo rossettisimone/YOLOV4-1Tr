@@ -20,20 +20,31 @@ import sklearn.metrics
 import matplotlib.pyplot as plt
 import itertools
 import io
+from itertools import groupby
 ###############################################################################################
 ####################################   PREPROCESSING   ########################################
 ###############################################################################################
 
-def rle_decoding( rle_arr, w, h):
+def rle_decoding(rle):
+    # dict.get(key,[value,]) return a defult value if key not exists
+    h, w = rle.get('size',[720,1280])
+    rle_arr = rle.get('counts',[0])
+    rle_arr = np.cumsum(rle_arr)
     indices = []
-    temp_idx = 0
-    for idx, cnt in zip(rle_arr[0::2], rle_arr[1::2]):
-        temp_idx += idx
-        indices.extend(list(range(temp_idx, temp_idx+cnt-1)))  # RLE is 1-based index
-        temp_idx += cnt
-    mask = np.zeros(h*w, dtype=np.uint8)
-    mask[indices] = 1
-    return mask.reshape((w, h)).T
+    extend = indices.extend
+    list(map(extend, map(lambda s,e: range(s, e), rle_arr[0::2], rle_arr[1::2])));
+    binary_mask = np.zeros(h*w, dtype=np.uint8)
+    binary_mask[indices] = 1
+    return binary_mask.reshape((w, h)).T
+
+def rle_encoding(binary_mask):
+    rle = {'counts': [], 'size': list(binary_mask.shape)}
+    counts = rle.get('counts')
+    for i, (value, elements) in enumerate(groupby(binary_mask.ravel(order='F'))):
+        if i == 0 and value == 1:
+            counts.append(0)
+        counts.append(len(list(elements)))
+    return rle
 
 def folders():
     folder = "{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
@@ -87,6 +98,39 @@ def data_pad( masks, bboxes):
     bboxes_padded[:min_bbox,...]=bboxes[:min_bbox,...]
     masks_padded[:min_bbox,...]=masks[:min_bbox,...]
     return masks_padded, bboxes_padded
+    
+def prediction_preprocess(image):
+    ih, iw    = (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE)
+    h,  w, _  = image.shape
+    scale = min(iw/w, ih/h)
+    nw, nh  = int(scale * w), int(scale * h)    
+    image = Image.fromarray(image)
+    image_resized = image.resize((nw, nh),Image.ANTIALIAS)
+    image_paded = np.full(shape=[ih, iw, 3], fill_value=128.0)
+    dw, dh = (iw - nw) // 2, (ih-nh) // 2
+    image_paded[dh:nh+dh, dw:nw+dw, :] = image_resized
+    image_paded = image_paded / 255.
+    image_paded=np.clip(image_paded,0,1)
+    return image_paded, h, w
+
+def prediction_postprocess(bboxes, masks, h, w):
+    ih, iw    = (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE)
+    scale = min(iw/w, ih/h)
+    nw, nh  = int(scale * w), int(scale * h)    
+    dw, dh = (iw - nw) // 2, (ih-nh) // 2
+    bboxes[:, [0, 2]] = (bboxes[:, [0, 2]] - dw) / scale 
+    bboxes[:, [1, 3]] = (bboxes[:, [1, 3]] - dh) / scale
+    # coco bbox format
+    # to x,y,w,h (x,y are top left corner)
+    bboxes[:, [2, 3]] =  bboxes[:, [2, 3]] - bboxes[:, [0, 1]]
+    bboxes = bboxes.round()
+    new_masks = np.zeros((masks.shape[0], h, w))
+    for i, mask in enumerate(masks):
+        mask = mask[dh:nh+dh, dw:nw+dw] 
+        mask = Image.fromarray(mask)
+        mask = np.round(mask.resize((w, h),Image.ANTIALIAS))
+        new_masks[i] = mask
+    return bboxes, new_masks
     
 def data_preprocess( image, gt_boxes, masks):
     ih, iw    = (cfg.TRAIN_SIZE, cfg.TRAIN_SIZE)
@@ -287,16 +331,16 @@ def compute_mAP(data, prediction):
     return AP_list            
     
 def draw_bbox(image, box=None, conf=None, class_id=None, mask=None, class_dict=None, mode='return'):
-    if np.any(class_id is None):
+    if np.any(class_id is None) and np.any(box is not None):
         class_id = np.arange(len(box))
-    elif class_dict is not None:
+    if class_dict is not None and np.any(class_id is not None) :
         class_id = [class_dict[int(c)] for c in class_id]
     img = Image.fromarray(np.array(image*255,dtype=np.uint8))                   
     draw = ImageDraw.Draw(img)   
     if np.any(box is not None):
         for i,(bb,cc) in enumerate(zip(box, class_id)):
             if np.any(bb>0):
-                draw.rectangle(bb, outline = COLORS[i%len(COLORS)]) 
+                draw.rectangle(list(bb), outline = COLORS[i%len(COLORS)]) 
                 xy = ((bb[2]+bb[0])*0.5, (bb[3]+bb[1])*0.5)
                 if not type(cc) is str:
                     cc = str(np.round(cc,3))
@@ -308,7 +352,7 @@ def draw_bbox(image, box=None, conf=None, class_id=None, mask=None, class_dict=N
         for i, mm in enumerate(mask):
             if np.any(mm>0):
 #                mm = unmold_mask(mm, xyxy, img.shape)
-                mm = np.array(Image.new('RGB', (img.shape[0], img.shape[1]), \
+                mm = np.array(Image.new('RGB', (img.shape[1], img.shape[0]), \
                                         color = COLORS[i%len(COLORS)])) * \
                                         np.tile(mm[...,None],(1,1,3))
                 img[mm>0] = img[mm>0]*0.5+mm[mm>0]*0.5
@@ -680,16 +724,16 @@ def check_proposals_tensor(proposal):
 
     return proposal
 #    
-def nms_proposals_tensor(proposal):
-    """This function compute nms proposals without iterating over the batch """
-    pconf = proposal[...,4:5] * proposal[...,5:]
-    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
-    boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
-            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
-            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
-    category = tf.add(category, 1.) # from [0, num_classes-1] to [1, num_classes]
-    proposal = tf.concat([boxes,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
-    return proposal
+#def nms_proposals_tensor(proposal):
+#    """This function compute nms proposals without iterating over the batch """
+#    pconf = proposal[...,4:5] * proposal[...,5:]
+#    pboxes = tf.tile(proposal[...,:4][:,:,tf.newaxis,:],(1,1,cfg.NUM_CLASSES,1))
+#    boxes, conf, category, *_ = tf.image.combined_non_max_suppression(
+#            boxes = pboxes, scores = pconf, max_output_size_per_class=cfg.MAX_PROP_PER_CLASS, \
+#            max_total_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH,pad_per_class=True, clip_boxes=True)
+#    category = tf.add(category, 1.) # from [0, num_classes-1] to [1, num_classes]
+#    proposal = tf.concat([boxes,conf[...,tf.newaxis],category[...,tf.newaxis]], axis=-1)    
+#    return proposal
 
 def nms_proposals(proposal):
    # non max suppression
@@ -700,21 +744,21 @@ def nms_proposals(proposal):
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
    return proposal
 #
-#def nms_proposals_tensor(proposal):
-#   # non max suppression
-#   pboxes = proposal[...,:4]
-#   pconf = proposal[...,4] * tf.reduce_max(proposal[...,5:], axis=-1)
-#   indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
+def nms_proposals_tensor(proposal):
+   # non max suppression
+   pboxes = proposal[...,:4]
+   pconf = proposal[...,4] * tf.reduce_max(proposal[...,5:], axis=-1)
+   indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
+
+   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
+   pbbox = proposal[...,:4]
+   pconf = proposal[...,4:5] * tf.reduce_max(proposal[...,5:], axis=-1)[...,None]
+   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]
+   pclass = tf.add(pclass, 1.) # from [0, num_classes-1] to [1, num_classes]
+   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  # proposal[...,5:]
+   
+   return proposal
 #
-#   proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
-#   pbbox = proposal[...,:4]
-#   pconf = proposal[...,4:5] * tf.reduce_max(proposal[...,5:], axis=-1)[...,None]
-#   pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]
-#   pclass = tf.add(pclass, 1.) # from [0, num_classes-1] to [1, num_classes]
-#   proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  
-#   
-#   return proposal
-##
 ## Non-max suppression
 #def nms(proposals):
 #    boxes, scores = proposals[...,:4], proposals[...,4]
@@ -995,14 +1039,14 @@ def plot_confusion_matrix(cm, class_names):
   plt.xticks(tick_marks, class_names, rotation=45)
   plt.yticks(tick_marks, class_names)
 
-  # Compute the labels from the normalized confusion matrix.
-  labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
-
-  # Use white text if squares are dark; otherwise black.
-  threshold = cm.max() / 2.
-  for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-    color = "white" if cm[i, j] > threshold else "black"
-    plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
+#  # Compute the labels from the normalized confusion matrix.
+#  labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
+#
+#  # Use white text if squares are dark; otherwise black.
+#  threshold = cm.max() / 2.
+#  for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+#    color = "white" if cm[i, j] > threshold else "black"
+#    plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
 
   plt.tight_layout()
   plt.ylabel('True label')

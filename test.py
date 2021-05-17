@@ -134,7 +134,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.21--5.720.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.60--6.610.h5')
 
 model.trainable = False
 
@@ -272,9 +272,22 @@ from loader_ytvos import DataLoader
 from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth, unmold_mask_batch
  
 
-ds = DataLoader(shuffle=True, augment=False)
+ds = DataLoader(shuffle=False, augment=False)
+import pandas as pd
+ds.val_list = pd.read_pickle(r'val_list.txt')
+ds.initilize_val_ds()
 iterator = ds.val_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
+#%%
+#import matplotlib.pyplot as plt
+#from loader_avakin import DataLoader 
+##import time
+#from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth, unmold_mask_batch
+# 
+#
+#ds = DataLoader(shuffle=True, augment=False)
+#iterator = ds.train_ds.unbatch().batch(1).__iter__()
+#_ = model.infer(iterator.next()[0])
 #%%
 data = iterator.next()
 image, gt_masks, gt_bboxes = data

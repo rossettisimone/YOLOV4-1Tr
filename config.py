@@ -13,19 +13,27 @@ AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1
 #AVA_SEGMENTS_DATASET_PATH = "/media/data3/Kinetics_AVA/segments/"
 #AVA_TRAIN_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/kinetics_frames_masks_train_v1.0.json", "/media/data3/Kinetics_AVA/ava_frames_masks_train_v2.2.json"]
 #AVA_VAL_ANNOTATION_PATH = ["/media/data3/Kinetics_AVA/ava_frames_masks_val_v2.2.json"]
-
-YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/train_all_frames/train.json"
-YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/train_all_frames/JPEGImages/"
-YT_VAL_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/valid_all_frames/valid.json"
-YT_VAL_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/valid_all_frames/JPEGImages/"
-YT_TEST_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/test_all_frames/test.json"
-YT_TEST_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/test_all_frames/JPEGImages/"
+#
+#YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/train_all_frames/train.json"
+#YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/train_all_frames/JPEGImages/"
+#YT_VAL_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/valid_all_frames/valid.json"
+#YT_VAL_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/valid_all_frames/JPEGImages/"
+#YT_TEST_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/test_all_frames/test.json"
+#YT_TEST_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVOS19/test_all_frames/JPEGImages/"
 # YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/train.json"
 # YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/train_all_frames/JPEGImages/"
 # YT_VAL_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/valid.json"
 # YT_VAL_FRAMES_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/JPEGImages/"
 # YT_TEST_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/test_all_frames/test.json"
 # YT_TEST_FRAMES_PATH = "/media/data3/YoutubeVOS19/test_all_frames/JPEGImages/"
+YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/train/instances.json"
+YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/train/JPEGImages/"
+
+YT_VALID_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/valid/instances.json"
+YT_VALID_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/valid/JPEGImages/"
+
+YT_TEST_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/test/instances.json"
+YT_TEST_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/test/JPEGImages/"
 
 SPLIT_RATIO = .1
 SHUFFLE = True
@@ -41,9 +49,9 @@ TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
 
-ID_THRESH = 0.5
-FG_THRESH = 0.5
-BG_THRESH = 0.4
+ID_THRESH = 0.4
+FG_THRESH = 0.4
+BG_THRESH = 0.3
 TOLERANCE = [0.4, 0.6, 0.8, 1.0]
 
 IOU_THRESH = 0.5
@@ -87,8 +95,8 @@ GRADIENT_CLIP = 5.0
 EPOCHS = 60
 FINE_TUNING = 2
 
-CONF_THRESH = 0.5
-NMS_THRESH = 0.4
+CONF_THRESH = 0.7
+NMS_THRESH = 0.2
 STEPS_PER_EPOCH_TRAIN = 10
 STEPS_PER_EPOCH_VAL = 20
 
@@ -144,3 +152,44 @@ CLASS_YTVIS19 = {1: 'person',
  38: 'eagle',
  39: 'earless_seal',
  40: 'tennis_racket'}
+
+CLASS_YTVIS21 = {1: 'airplane',
+ 2: 'bear',
+ 3: 'bird',
+ 4: 'boat',
+ 5: 'car',
+ 6: 'cat',
+ 7: 'cow',
+ 8: 'deer',
+ 9: 'dog',
+ 10: 'duck',
+ 11: 'earless_seal',
+ 12: 'elephant',
+ 13: 'fish',
+ 14: 'flying_disc',
+ 15: 'fox',
+ 16: 'frog',
+ 17: 'giant_panda',
+ 18: 'giraffe',
+ 19: 'horse',
+ 20: 'leopard',
+ 21: 'lizard',
+ 22: 'monkey',
+ 23: 'motorbike',
+ 24: 'mouse',
+ 25: 'parrot',
+ 26: 'person',
+ 27: 'rabbit',
+ 28: 'shark',
+ 29: 'skateboard',
+ 30: 'snake',
+ 31: 'snowboard',
+ 32: 'squirrel',
+ 33: 'surfboard',
+ 34: 'tennis_racket',
+ 35: 'tiger',
+ 36: 'train',
+ 37: 'truck',
+ 38: 'turtle',
+ 39: 'whale',
+ 40: 'zebra'}
