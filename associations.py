@@ -128,7 +128,9 @@ def associate(mask1: np.ndarray, mask2: np.ndarray, verbose: int = 1) -> (np.nda
 #    print(A)
     # use heuristics to avoid bad associations
     associations, new_indices, doubtful_indices = prune_heuristics(A = A)
-
+    
+    assert len(set(associations[:,1]).intersection(set(new_indices)).intersection(set(doubtful_indices)))==0
+    
     if verbose :
         print(f'match={associations.shape[0]}, new={new_indices.shape[0]}, pruned={doubtful_indices.shape[0]}')
     
@@ -152,6 +154,8 @@ class State(object):
         self.cat = cat
         if isinstance(self.rle, np.ndarray):
             self.rle = rle_encoding(self.rle)
+    def get_rle(self) -> dict():
+        return self.rle
     
     def get_mask(self):
         return rle_decoding(self.rle)
@@ -160,7 +164,7 @@ class Instance(object):
     def __init__(self, video_id: int, idx: int, state: State, t: int, T: int):
         self.video_id = video_id
         self.id = idx
-        self.state = state
+        self.state = None
         self.history = []
         self.valid = 0
         self.t = 0
@@ -179,9 +183,11 @@ class Instance(object):
             self.state = state
     
     def fill(self, t: int) -> None:
-        if t > 0:
-            for i in range(t):
-                self.update(None)
+        for _ in range(t):
+            self.update(None)
+    
+    def get_id(self) -> int:
+        return self.id
     
     def get_mask(self) -> np.ndarray:
         return self.state.get_mask()
@@ -190,15 +196,16 @@ class Instance(object):
         return self.state
     
     def end(self) -> None:
-        for i in range(self.T-self.t):
-            self.update(None)
+        self.fill(self.T-self.t)
+            
             
     def get_summary(self, rle_format: bool = True) -> dict:
         summary = dict()
         summary['video_id'] = int(self.video_id)
         summary['category_id'] = int(np.bincount([s.cat for s in self.history if s!=None]).argmax())
-        summary['segmentations'] = list([s.rle if s!=None else s for s in self.history])
+        summary['segmentations'] = list([s.get_rle() if s!=None else None for s in self.history])
         summary['score'] = float(np.mean([s.conf for s in self.history if s!=None]))
+        assert len(summary['segmentations']) == self.T
         return summary
          
 class InstanceDealer(object):
@@ -214,12 +221,16 @@ class InstanceDealer(object):
     def add(self, state: State) -> None:
         self.instances.append(Instance(self.video_id, len(self.instances), state, self.t, self.T))
     
+    def get_ids(self) -> List[int]:
+        return list([s.get_id() for s in self.instances])
+    
     def get_states(self) -> List[State]:
+        self.t += 1
         return list([s.get_state() for s in self.instances])
         
-    def update(self, states: List[np.ndarray]) -> None:
-        self.t += 1
-        for index,state in enumerate(states):
+    def update(self, states: Optional[State] = None) -> None:
+        assert len(states) == len(self.instances)
+        for index, state in enumerate(states):
             self.instances[index].update(state)
     
     def end_states(self) -> None:
@@ -243,7 +254,7 @@ class InstanceDealer(object):
         
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
-SEGMENTS = file_reader('pred_test_instances.json')
+SEGMENTS = file_reader('pred_valid_instances.json')
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import pandas as pd
@@ -264,42 +275,46 @@ TRACKED = []
 
 for idd in ids:
     
-    FROM, TO = idx[idd], idx[idd+1] if idd+1 < len(idx) else len(SEGMENTS['annotations'])-1
-    
-    length_video = TO-FROM
+    FROM, TO = idx[idd], idx[idd+1] if idd+1 < len(idx) else len(SEGMENTS['annotations'])
     
     video_id = SEGMENTS['annotations'][FROM]['video_id']
+    
+    length_video = SEGMENTS['annotations'][FROM]['len_sequence']
+    
+    assert TO-FROM == length_video
     
     dealer = InstanceDealer(video_id, length_video)
     
     for i, annotation in enumerate(SEGMENTS['annotations'][FROM:TO]):
-        
+
         new_states = [State(s,c,d) for s,c,d in zip(annotation['pred_segmentations'],\
                       annotation['pred_confs'], annotation['pred_categories']) if not s==None]
                 
         old_states = dealer.get_states()
-        
+
         if len(new_states)>0:
             
             if len(old_states)>0:
-                associations, new_indices, doubtful_indices = associate(np.array([s.get_mask() for s in new_states]).transpose(1,2,0), \
-                                                                        np.array([s.get_mask() for s in old_states]).transpose(1,2,0), verbose = 0)
-#                print(associations)
+                associations, new_indices, doubtful_indices = associate(np.array([n.get_mask() for n in new_states]).transpose(1,2,0), \
+                                                                        np.array([o.get_mask() for o in old_states]).transpose(1,2,0), verbose = 0)
+
                 for row in associations:
                     old_states[int(row[1])] = new_states[int(row[0])]
-                for index in list(set(range(len(old_states))).difference(list(associations[:,1].astype(int)))):
-                    old_states[index] = None
+                for j in list(set(dealer.get_ids()).difference(set(list(associations[:,1].astype(int))))):
+                    old_states[j] = None
                 dealer.update(old_states)
-                for index in new_indices:
-                    dealer.add(new_states[index])
+                for z in new_indices:
+                    dealer.add(new_states[z])
             else:
                 for s in new_states:
                     dealer.add(s)
         else:
-            for index in range(len(old_states)):
-                old_states[index] = None
+            if len(old_states)>0:
+                
+                for x in range(len(old_states)):
+                    old_states[x] = None
                 dealer.update(old_states)
-        
+                        
     dealer.end_states()
     
     dealer.print_states()
@@ -308,7 +323,7 @@ for idd in ids:
     
     TRACKED.extend(instances)
     
-with open('results-test-heuristics2.json', 'w') as f:
+with open('results-valid-heuristics2.json', 'w') as f:
     
     f.write(json.dumps(TRACKED))
 

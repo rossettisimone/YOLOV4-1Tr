@@ -176,7 +176,7 @@ def yolov4_plus1_decode_graph(input_layer):
     """
     n_2, n_3, n_4, n_5 = input_layer
 
-    PRED_CH = cfg.BBOX_REG + cfg.BBOX_CONF #+ cfg.NUM_CLASSES
+    PRED_CH = cfg.BBOX_REG #+ cfg.BBOX_CONF #+ cfg.NUM_CLASSES
     STACK_PRED_CH = cfg.NUM_ANCHORS * PRED_CH
     
     # level 2
@@ -208,16 +208,16 @@ def yolov4_plus1_decode_graph(input_layer):
                                       cfg.TRAIN_SIZE//cfg.STRIDES[3], cfg.NUM_ANCHORS, \
                                       PRED_CH]), perm = [0, 3, 1, 2, 4])
     # CLASSIFICATION
-    c_2 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_2)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
+    c_2 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES+1)(n_2)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_2 = tf.concat([p_2,c_2],axis=-1)
     
-    c_3 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_3)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
+    c_3 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES+1)(n_3)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_3 = tf.concat([p_3,c_3],axis=-1)
 
-    c_4 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_4)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
+    c_4 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES+1)(n_4)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_4 = tf.concat([p_4,c_4],axis=-1)
 
-    c_5 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES)(n_5)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
+    c_5 = tf.tile(tf.keras.layers.Dense(cfg.NUM_CLASSES+1)(n_5)[:,None],(1,cfg.NUM_ANCHORS,1,1,1))
     p_5 = tf.concat([p_5,c_5],axis=-1)
     
     return [p_2,p_3,p_4,p_5], [e_2,e_3,e_4,e_5]
@@ -254,6 +254,13 @@ def yolov4_plus1_proposal_graph(predictions):
     d_5 = decode_prediction(p_5, ANCHORS[3], cfg.STRIDES[3])
     proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels
     proposals = nms_proposals_tensor(proposals)
+    
+    pbbox = proposals[...,:4]
+    pconf = tf.reduce_max(proposals[...,4:], axis=-1)[...,tf.newaxis]
+    pclass = tf.cast(tf.argmax(proposals[...,4:],axis=-1),tf.float32)[...,tf.newaxis]
+    pclass = tf.add(pclass, 1.) # from [0, num_classes-1] to [1, num_classes]
+    proposals = tf.concat([pbbox,pconf,pclass], axis=-1)  # proposal[...,5:]
+   
     
     # stop backpropagation for all zero boxes, this leads to nan gradient due to log decoding
     mask_non_zero_entry = tf.cast(tf.not_equal(tf.reduce_sum(proposals[...,:4],axis=-1),0.0)[...,tf.newaxis],tf.float32)

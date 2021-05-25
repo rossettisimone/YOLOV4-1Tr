@@ -19,17 +19,17 @@ class Model(tf.keras.Model):
         image, gt_masks, gt_bboxes = data
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-        alb_loss, box_loss, conf_loss, class_loss, mask_loss = train_step(self, data, self.optimizer)
-        return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss, "class_loss": class_loss, \
-                "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_d":self.s_d, "s_m":self.s_m }
+        alb_loss, box_loss, class_loss, mask_loss = train_step(self, data, self.optimizer)
+        return {"alb_loss": alb_loss, "box_loss": box_loss, "class_loss": class_loss, \
+                "mask_loss": mask_loss, "s_r":self.s_r, "s_d":self.s_d, "s_m":self.s_m }
     
     def test_step(self, data):
         image, gt_masks, gt_bboxes = data
         label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
         data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-        alb_loss, box_loss, conf_loss, class_loss, mask_loss = val_step(self, data)
-        return {"alb_loss": alb_loss, "box_loss": box_loss, "conf_loss": conf_loss,"class_loss": class_loss,  \
-                "mask_loss": mask_loss, "s_r":self.s_r, "s_c":self.s_c, "s_d":self.s_d, "s_m":self.s_m }
+        alb_loss, box_loss, class_loss, mask_loss = val_step(self, data)
+        return {"alb_loss": alb_loss, "box_loss": box_loss, "class_loss": class_loss,  \
+                "mask_loss": mask_loss, "s_r":self.s_r, "s_d":self.s_d, "s_m":self.s_m }
     
 def get_model(pretrained_backbone=True, infer=False):
     input_layer = tf.keras.layers.Input(cfg.INPUT_SHAPE)
@@ -50,7 +50,6 @@ def get_model(pretrained_backbone=True, infer=False):
         if pretrained_backbone:
             load_weights_cspdarknet53(model, cfg.CSP_DARKNET53) # load backbone weights and set to non trainable
             freeze_backbone(model)
-        model.s_c = tf.Variable(initial_value=0.0, trainable=True, name = 's_c')
         model.s_r = tf.Variable(initial_value=0.0, trainable=True, name = 's_r')
         model.s_d = tf.Variable(initial_value=0.0, trainable=True, name = 's_d')
         model.s_m = tf.Variable(initial_value=0.0, trainable=True, name = 's_m')
@@ -94,24 +93,22 @@ def compute_loss(model, labels, preds, proposals, target_class_ids, target_masks
 
 def compute_loss_rpn(model, labels, preds):
     box_loss = []
-    conf_loss = []
     class_loss = []
     for label, pred in zip(labels, preds):
-        lbox, lconf, lclass = compute_loss_rpn_level(label, pred)
+        lbox, lclass = compute_loss_rpn_level(label, pred)
         box_loss.append(lbox)
-        conf_loss.append(lconf)
         class_loss.append(lclass)
-    box_loss, conf_loss, class_loss = tf.reduce_mean(box_loss,axis=0), tf.reduce_mean(conf_loss,axis=0), tf.reduce_mean(class_loss,axis=0)
-    alb_loss = tf.math.exp(-model.s_r)*box_loss + tf.math.exp(-model.s_c)*conf_loss + tf.math.exp(-model.s_d)*class_loss \
-                + (model.s_r + model.s_c + model.s_d) #Automatic Loss Balancing        
-    return alb_loss, box_loss, conf_loss, class_loss
+    box_loss, class_loss = tf.reduce_mean(box_loss,axis=0), tf.reduce_mean(class_loss,axis=0)
+    alb_loss = tf.math.exp(-model.s_r)*box_loss + tf.math.exp(-model.s_d)*class_loss \
+                + (model.s_r + model.s_d) #Automatic Loss Balancing        
+    return alb_loss, box_loss, class_loss
 
 def compute_loss_rpn_level(label, pred):
-    pbox, pconf, pclass = pred[..., :4], pred[..., 4:6],  pred[..., 6:]
-    tbox, tconf, tid = label[...,:4], label[...,4], label[..., 5]
+    pbox, pclass = pred[..., :4],  pred[..., 4:]
+    tbox, tid = label[...,:4], label[..., 5]
     # regression loss
     # stop gradient for regions labeled -1 or 0 below CONF threshold
-    positive_entry = tf.tile(tf.cast(tf.greater(tconf,0.0)[...,tf.newaxis], tf.float32),(1,1,1,1,4))
+    positive_entry = tf.tile(tf.cast(tf.greater(tid,0.0)[...,tf.newaxis], tf.float32),(1,1,1,1,4))
     positive_entry = tf.stop_gradient(positive_entry)
     tbox = tf.stop_gradient(tbox)
     lbox = tf.cond(tf.greater(tf.reduce_sum(positive_entry),0.0), lambda: \
@@ -119,12 +116,12 @@ def compute_loss_rpn_level(label, pred):
                    lambda: tf.constant(0.0))
     # conf loss
     # stop gradient for regions labeled -1 below CONF threshold
-    non_negative_entry = tf.greater_equal(tconf,0.0)
-    pconf = entry_stop_gradients(pconf, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32)) 
-    tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.int32)
-    non_negative_entry = tf.stop_gradient(non_negative_entry)
-    tconf = tf.stop_gradient(tconf)
-    lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
+#    non_negative_entry = tf.greater_equal(tconf,0.0)
+#    pconf = entry_stop_gradients(pconf, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32)) 
+#    tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.int32)
+#    non_negative_entry = tf.stop_gradient(non_negative_entry)
+#    tconf = tf.stop_gradient(tconf)
+#    lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
     # classification loss
     # stop gradient for regions labeled -1 below CONF threshold
 #    tid = tf.reduce_max(tid, axis=1) # reduce max but ignore overlapping areas
@@ -138,7 +135,7 @@ def compute_loss_rpn_level(label, pred):
                      lambda: tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tid[non_negative_entry], \
                                                                                        logits=pclass[non_negative_entry])), \
                      lambda: tf.constant(0.0))
-    return lbox, lconf, lclass
+    return lbox, lclass #lconf
 
 def compute_loss_mrcnn(model, proposals, target_class_ids, target_masks, pred_masks):
     # prepare the ground truth
