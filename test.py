@@ -123,7 +123,7 @@ for i in range(1):
     proposals = decode_labels(predictions)
     bbox, conf, classs = tf.split(proposals[0], (4,1,1),axis=-1)
     thr = conf[...,0]>cfg.CONF_THRESH
-    bbox, conf, classs = bbox[thr], conf[thr], classs[thr]-1
+    bbox, conf, classs = bbox[thr], conf[thr], classs[thr]
     bbox= tf.round(bbox*cfg.TRAIN_SIZE)
     draw_bbox(image[0].numpy(), box = bbox, class_id = classs, class_dict = ds.class_dict, mode= 'PIL')
 
@@ -134,7 +134,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.39--9.804.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.41--9.707.h5')
 
 model.trainable = False
 
@@ -272,7 +272,7 @@ from loader_ytvos import DataLoader
 from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth, unmold_mask_batch
  
 
-ds = DataLoader(shuffle=False, augment=False)
+ds = DataLoader(shuffle=True, augment=False)
 import pandas as pd
 ds.val_list = pd.read_pickle(r'val_list.txt')
 ds.initilize_val_ds()

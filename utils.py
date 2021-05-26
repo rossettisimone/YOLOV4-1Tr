@@ -548,7 +548,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
         y = tf.map_fn(map_1, x, fn_output_signature=tf.float32)
         return y
             
-    point_mask = tf.cast(tf.reduce_max(tf.map_fn(map_0, indices, fn_output_signature=tf.float32),axis=0), tf.bool)
+    point_mask = tf.cast(tf.ones_like(iou_map),tf.bool)#tf.cast(tf.reduce_max(tf.map_fn(map_0, indices, fn_output_signature=tf.float32),axis=0), tf.bool)
     
     id_index = tf.logical_and(iou_map > cfg.ID_THRESH * tol, point_mask)
     fg_index = tf.logical_and(iou_map > cfg.FG_THRESH * tol, point_mask)                              
@@ -579,7 +579,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
 
 def decode_label(label, anchors, stride):
     label = tf.transpose(label,(0,1,3,2,4)) # decode_delta_map has some issue
-    pconf = label[..., 4]
+#    pconf = label[..., 4]
     pclass = label[..., 5]
     pbox = label[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
@@ -587,15 +587,11 @@ def decode_label(label, anchors, stride):
     pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
     pbox = xywh2xyxy(pbox) # to bbox
     pbox = tf.clip_by_value(pbox,0.0,1.0) # clip to avoid nan
-    proposal = tf.concat([pbox, pconf[...,tf.newaxis], pclass[...,tf.newaxis]], axis=-1) 
+    proposal = tf.concat([pbox, pclass[...,tf.newaxis]], axis=-1) 
     nB = tf.shape(proposal)[0]
     _, nA, nGh, nGw, nC = proposal.shape       
     proposal = tf.reshape(proposal, [nB, tf.multiply(nA, tf.multiply(nGh , nGw)), nC]) # b x nBB x (4 + 1 + 1 + 208) rois
    
-    pconf = proposal[..., 4]
-    indices = tf.argsort(pconf, axis=-1, direction='DESCENDING', stable=True)
-    proposal = tf.gather(proposal,indices, axis=1, batch_dims=1) 
-    
     proposal = check_proposals_tensor(proposal)
     proposal = nms_proposals(proposal)
     return proposal
@@ -610,11 +606,11 @@ def decode_labels(predictions, embeddings = None):
     
     proposals = tf.concat([d_2,d_3,d_4,d_5],axis=1) #concat along levels    
     
-    pbox, pconf, pclass = tf.split(proposals,(4,1,1),axis=-1)
+    pbox, pclass = tf.split(proposals,(4,1),axis=-1)
     
-    pclass = tf.one_hot(tf.cast(pclass[...,0],tf.int32),cfg.NUM_CLASSES)
+    pclass = tf.one_hot(tf.cast(pclass[...,0],tf.int32),cfg.NUM_CLASSES+1)[...,1:]
     
-    proposals = tf.concat([pbox, pconf, pclass], axis=-1)
+    proposals = tf.concat([pbox, pclass], axis=-1)
     
     proposals = nms_proposals_tensor(proposals)
 
