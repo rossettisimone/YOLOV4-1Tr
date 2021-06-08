@@ -346,7 +346,7 @@ def draw_bbox(image, box=None, conf=None, class_id=None, mask=None, class_dict=N
                     cc = str(np.round(cc,3))
                 draw.text(xy, cc, \
                           font=ImageFont.truetype("./other/arial.ttf"), \
-                          fontsize = 15, fill=COLORS[i%len(COLORS)])
+                          fontsize = 30, fill=COLORS[(len(COLORS)-i)%len(COLORS)])
     img = np.array(img)
     if np.any(mask is not None):
         for i, mm in enumerate(mask):
@@ -569,7 +569,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
 #    tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
     tbox = tf.where(fg_index[...,None], tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), tbox)
         
-    label = tf.concat([tbox,tconf,tid],axis=-1)
+    label = tf.concat([tbox,tconf,tid,iou_map[...,None]],axis=-1)
     # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
     label = tf.transpose(label,(0,2,1,3))
     return label

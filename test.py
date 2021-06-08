@@ -108,7 +108,7 @@ for i in range(1):
     image, gt_masks, gt_bboxes = data
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 #    data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
-    gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
+#    gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
     gt_bbox, gt_class_id, gt_mask = decode_ground_truth(gt_masks[0], gt_bboxes[0])
     draw_bbox(image[0].numpy(), box = gt_bbox, mask=gt_mask, class_id = gt_class_id, class_dict = ds.class_dict, mode= 'PIL')
     plt.imshow(tf.reduce_sum(tf.reduce_sum(label_2[0],axis=0),axis=-1))
@@ -134,7 +134,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.60--6.610.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.24--8.668.h5')
 
 model.trainable = False
 
@@ -272,10 +272,14 @@ from loader_ytvos import DataLoader
 from utils import show_infer, compute_mAP, draw_bbox, show_mAP, encode_labels, crop_and_resize,xyxy2xywh, decode_ground_truth, unmold_mask_batch
  
 
-ds = DataLoader(shuffle=False, augment=False)
+ds = DataLoader(shuffle=True, augment=False)
 import pandas as pd
 ds.val_list = pd.read_pickle(r'val_list.txt')
 ds.initilize_val_ds()
+
+ids_dataset = list(range(len(ds.annotation_list)))
+train_dataset = list(set(ids_dataset).difference(set(ds.val_list)))
+
 iterator = ds.val_ds.unbatch().batch(1).__iter__()
 _ = model.infer(iterator.next()[0])
 #%%

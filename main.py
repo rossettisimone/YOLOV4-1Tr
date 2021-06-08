@@ -5,7 +5,7 @@ Created on Thu Apr 22 19:16:12 2021
 
 @author: 
 """
-from util import file_reader, rle_decoding, draw_bbox, show_image
+from utils import file_reader, rle_decoding, draw_bbox, show_image
 from PIL import Image
 import numpy as np
 import os
@@ -36,7 +36,7 @@ OFFSET = 1
 FROM = np.random.choice(len(ANNOTATIONS)-OFFSET) # i.e. 48782
 TO = FROM + OFFSET
 
-for a in ANNOTATIONS[:20]:
+for a in ANNOTATIONS[700:720]:
     file_name = a['file_name']
     img = np.array(Image.open(os.path.join(IMG_PATH, file_name)))/255
     # GROUND TRUTH
