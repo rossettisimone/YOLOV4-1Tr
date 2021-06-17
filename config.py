@@ -26,14 +26,14 @@ AVA_VAL_ANNOTATION_PATH = ["/home/fiorapirri/Documents/workspace/ava_kinetics_v1
 # YT_VAL_FRAMES_PATH = "/media/data3/YoutubeVOS19/valid_all_frames/JPEGImages/"
 # YT_TEST_ANNOTATION_PATH = "/media/data3/YoutubeVOS19/test_all_frames/test.json"
 # YT_TEST_FRAMES_PATH = "/media/data3/YoutubeVOS19/test_all_frames/JPEGImages/"
-YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/train/instances.json"
-YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/train/JPEGImages/"
+YT_TRAIN_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YouTubeVIS21/train/instances.json"
+YT_TRAIN_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YouTubeVIS21/train/JPEGImages/"
 
-YT_VALID_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/valid/instances.json"
-YT_VALID_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/valid/JPEGImages/"
+YT_VALID_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YouTubeVIS21/valid/instances.json"
+YT_VALID_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YouTubeVIS21/valid/JPEGImages/"
 
-YT_TEST_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/test/instances.json"
-YT_TEST_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YoutubeVIS21/test/JPEGImages/"
+YT_TEST_ANNOTATION_PATH = "/home/fiorapirri/Documents/workspace/YouTubeVIS21/test/instances.json"
+YT_TEST_FRAMES_PATH = "/home/fiorapirri/Documents/workspace/YouTubeVIS21/test/JPEGImages/"
 
 SPLIT_RATIO = .1
 SHUFFLE = True
@@ -44,7 +44,7 @@ MIN_BOX_DIM = 5e-4
 MIN_BOX_RATIO = 1e-3
 
 # Input 
-BATCH = 4
+BATCH = 2
 TRAIN_SIZE = 416
 INPUT_SHAPE= (TRAIN_SIZE, TRAIN_SIZE, 3)
 MAX_INSTANCES = 15
@@ -67,10 +67,20 @@ NUM_CLASSES = 40
 #        64,  81,  58, 144, 145, 115, 164, 173, 142, 153, 170, 366, 326,
 #       345, 374, 385, 364, 395, 396]
 
-ANCHORS = [  2,   2,   4,   4,   5,   6,   7,   7,   9,   8,  14,  11,
-           15,  19,  20,  24,  22,  25,  27,  33,  33,  35,  47,  45,  
-           56,  48, 72,  63,  86,  67, 106,  89, 113, 91, 143, 113,
-         184, 122, 253, 168, 287, 220, 323, 223, 376, 228, 398, 228]
+#ANCHORS = [  2,   2,   4,   4,   5,   6,   7,   7,   9,   8,  14,  11,
+#           15,  19,  20,  24,  22,  25,  27,  33,  33,  35,  47,  45,  
+#           56,  48, 72,  63,  86,  67, 106,  89, 113, 91, 143, 113,
+#         184, 122, 253, 168, 287, 220, 323, 223, 376, 228, 398, 228]
+#ANCHORS = [1,1, 1,2, 3,1, 3,3, 2,5, 8,2, 3,7, 5,4, 3,11, 5,8, 
+#           22,8, 16,12, 11,27, 16,20, 23,15, 38,11, 22,23, 17,30, 13,39, 31,20, 
+#           44,71, 57,57, 99,39, 40,97, 79,53, 55,84, 70,70, 173,31, 96,66, 61,110, 
+#           273,102, 160,178, 247,144, 212,184, 179,229, 354,143, 289,180, 242,227, 312,230, 394, 220]
+#
+
+ANCHORS = [2, 2, 2, 4, 6, 2, 6, 6, 4, 10, 16, 4, 6, 14, 10, 8, 6, 22, 10, 16, 
+           22,8, 16,12, 11,27, 16,20, 23,15, 38,11, 22,23, 17,30, 13,39, 31,20, 
+           44,71, 57,57, 99,39, 40,97, 79,53, 55,84, 70,70, 173,31, 96,66, 61,110, 
+           273,102, 160,178, 247,144, 212,184, 179,229, 354,143, 289,180, 242,227, 312,230, 394, 220]
 
 
 #ANCHORS_5 = [  3,   2,   4,   5,   5,   6,   9,  10,  11,  11,  
@@ -100,12 +110,12 @@ ANCHORS = [  2,   2,   4,   4,   5,   6,   7,   7,   9,   8,  14,  11,
 #            111, 187, 136, 298, 138,  99, 167, 193, 
 #            239, 376, 322, 414, 349, 256, 424, 423]
 
-import numpy as np
-ANCHORS = np.array(np.array(ANCHORS)/416*TRAIN_SIZE,np.int32) # if want to test different input  size
+#import numpy as np
+#ANCHORS = np.array(np.array(ANCHORS)/416*TRAIN_SIZE,np.int32) # if want to test different input  size
 
-NUM_ANCHORS = 6
+NUM_ANCHORS = 10
 BBOX_REG = 4
-BBOX_CONF = 2
+BBOX_CONF = 1
 
 
 STRIDES = [ 4, 8, 16, 32]
@@ -137,7 +147,7 @@ FC_LAYER_SIZE = 1024
 POOL_SIZE = 7
 MASK_POOL_SIZE = POOL_SIZE*2
 MASK_SIZE = MASK_POOL_SIZE*2 #28
-MASK_CONF = 2
+MASK_CONF = 1
 
 CLASS_YTVIS19 = {1: 'person',
  2: 'giant_panda',

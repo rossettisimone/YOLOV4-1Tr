@@ -243,7 +243,7 @@ class InstanceDealer(object):
         
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
-SEGMENTS = file_reader('pred_test_instances.json')
+SEGMENTS = file_reader('new_10_pred_val_instances.json')
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 import pandas as pd
@@ -304,20 +304,27 @@ for idd in ids:
     
     dealer.print_states()
     
-    instances = dealer.get_summaries(tolerance = 3, min_score = 0.6)
+    instances = dealer.get_summaries(tolerance = 2, min_score = 0.5)
     
     TRACKED.extend(instances)
     
-with open('results-test-heuristics2.json', 'w') as f:
+with open('new-new-10-results-val-heuristics.json', 'w') as f:
     
     f.write(json.dumps(TRACKED))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-for state in dealer.instances[1].history:
+for state in dealer.instances[0].history:
     if state != None:
         plt.imshow(state.get_mask())
         plt.show()
     else:
         print('None')
         
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+import pickle
+
+
+with open('dict.pkl', 'rb') as f:
+    data = pickle.load(f)

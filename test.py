@@ -106,6 +106,7 @@ from utils import decode_labels
 for i in range(1):
     data = iterator.next()
     image, gt_masks, gt_bboxes = data
+    gt_bboxes
     label_2, label_3, label_4, label_5 = tf.map_fn(encode_labels, gt_bboxes, fn_output_signature=(tf.float32, tf.float32, tf.float32, tf.float32))
 #    data = image, label_2, label_3, label_4, label_5, gt_masks, gt_bboxes 
 #    gt_masks = tf.map_fn(crop_and_resize, (xyxy2xywh(gt_bboxes)/cfg.TRAIN_SIZE, tf.cast(tf.greater(gt_bboxes[...,4],-1.0),tf.float32), gt_masks), fn_output_signature=tf.float32)
@@ -134,7 +135,7 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.24--8.668.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.60--10.277.h5')
 
 model.trainable = False
 

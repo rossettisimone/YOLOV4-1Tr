@@ -43,7 +43,7 @@ def get_model(pretrained_backbone=True, infer=False):
     if infer:
         box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
         box = tf.round(box*cfg.TRAIN_SIZE)
-        mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+        mask = tf.nn.sigmoid(mrcnn_mask)#[...,1]
         model = Model(inputs=input_layer, outputs=[box, conf, class_id, mask])
     else:
         model = Model(inputs=input_layer, outputs=[rpn_predictions, rpn_proposals, mrcnn_mask])
@@ -107,7 +107,7 @@ def compute_loss_rpn(model, labels, preds):
     return alb_loss, box_loss, conf_loss, class_loss
 
 def compute_loss_rpn_level(label, pred):
-    pbox, pconf, pclass = pred[..., :4], pred[..., 4:6],  pred[..., 6:]
+    pbox, pconf, pclass = pred[..., :4], pred[..., 4],  pred[..., 5:]
     tbox, tconf, tid = label[...,:4], label[...,4], label[..., 5]
     # regression loss
     # stop gradient for regions labeled -1 or 0 below CONF threshold
@@ -120,11 +120,14 @@ def compute_loss_rpn_level(label, pred):
     # conf loss
     # stop gradient for regions labeled -1 below CONF threshold
     non_negative_entry = tf.greater_equal(tconf,0.0)
-    pconf = entry_stop_gradients(pconf, tf.cast(non_negative_entry[...,tf.newaxis],tf.float32)) 
-    tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.int32)
+    pconf = entry_stop_gradients(pconf, tf.cast(non_negative_entry,tf.float32)) 
+#    tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.int32)
+    tconf = tf.cast(tf.where(non_negative_entry, tconf, 0.0),tf.float32)
     non_negative_entry = tf.stop_gradient(non_negative_entry)
     tconf = tf.stop_gradient(tconf)
-    lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
+
+#    lconf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tconf,logits=pconf))
+    lconf = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tconf,logits=pconf))
     # classification loss
     # stop gradient for regions labeled -1 below CONF threshold
 #    tid = tf.reduce_max(tid, axis=1) # reduce max but ignore overlapping areas
@@ -173,9 +176,9 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
     target_masks = tf.reshape(target_masks, (-1, mask_shape[2], mask_shape[3]))
     pred_shape = tf.shape(pred_masks)
     pred_masks = tf.reshape(pred_masks,
-                           (-1, pred_shape[2], pred_shape[3], pred_shape[4]))
+                           (-1, pred_shape[2], pred_shape[3]))# pred_shape[4]
     # Permute predicted masks to [N, num_classes, height, width]
-    pred_masks = tf.transpose(pred_masks, [0, 3, 1, 2])
+#    pred_masks = tf.transpose(pred_masks, [0, 3, 1, 2])
 
     # Only positive ROIs contribute to the loss. And only
     # the class specific mask of each ROI.
@@ -196,14 +199,18 @@ def mask_loss_graph(target_masks, target_class_ids, pred_masks):
 #                   lambda: tf.keras.losses.binary_crossentropy(y_true, y_pred),\
 #                   lambda: tf.constant(0.0))
     # Permute again masks to [N, height, width, num_classes]
-    y_pred = tf.transpose(y_pred, [0, 2, 3, 1])
+#    y_pred = tf.transpose(y_pred, [0, 2, 3, 1])
 
     # cast to correct label type
-    y_true = tf.cast(y_true,tf.int32)
+#    y_true = tf.cast(y_true,tf.int32)
+    y_true = tf.cast(y_true,tf.float32)
     y_true = tf.stop_gradient(y_true)
 
+#    loss = tf.cond(tf.greater(tf.size(y_true), 0),\
+#                   lambda: tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred),\
+#                   lambda: tf.constant(0.0))
     loss = tf.cond(tf.greater(tf.size(y_true), 0),\
-                   lambda: tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred),\
+                   lambda: tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=y_pred),\
                    lambda: tf.constant(0.0))
     loss = tf.reduce_mean(loss)
     return loss

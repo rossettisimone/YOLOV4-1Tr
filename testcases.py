@@ -137,8 +137,8 @@ def test_tf_mask_transform(NUM_TESTS=10, verbose = 0):
         plt.plot(b1x,b1y,'g-')
         plt.plot(b2x,b2y,'r-')
         plt.plot([x1,x2],[y1,y2],'bo')
-        plt.xlim(0,416)
-        plt.ylim(0,416)
+        plt.xlim(0,cfg.TRAIN_SIZE)
+        plt.ylim(0,cfg.TRAIN_SIZE)
         plt.gca().invert_yaxis()
 
     avg_score = 0

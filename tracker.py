@@ -28,22 +28,19 @@ model = get_model(infer=True)
 
 #fine_tuning(model)
 
-model.load_weights('/home/fiorapirri/tracker/weights/model.60--6.610.h5')
+model.load_weights('/home/fiorapirri/tracker/weights/model.60--10.277.h5')
 
 model.trainable = False
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-DATASET = file_reader(cfg.YT_TEST_ANNOTATION_PATH)
+DATASET = file_reader(cfg.YT_VALID_ANNOTATION_PATH)
 
-IMG_PATH = os.path.join(cfg.YT_TEST_FRAMES_PATH)
+IMG_PATH = os.path.join(cfg.YT_VALID_FRAMES_PATH)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 VIDEOS = DATASET['videos']
 
-CLASSES = {}
-
-for obj in DATASET['categories']:
-    CLASSES[int(obj['id'])] = str(obj['name'])
+CLASSES = cfg.CLASS_YTVIS21
     
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LIB %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -56,8 +53,8 @@ for obj in DATASET['categories']:
         
 NEW_DATASET = []
 new_annotation_count = 0
-CONF_THRESH = 0.6
-for video_index in tqdm(range(len(VIDEOS)),ascii=True, desc='predicting'):
+CONF_THRESH = 0.5
+for video_index in tqdm(range(222,len(VIDEOS)),ascii=True, desc='predicting'):
     video = VIDEOS[video_index]
     video_id = video['id']
     length = video['length']
@@ -111,20 +108,18 @@ NEW_INSTANCES = dict()
 NEW_INSTANCES['categories'] = cfg.CLASS_YTVIS21
 NEW_INSTANCES['annotations'] = NEW_DATASET
 
-with open('pred_test_instances.json', 'w') as f:
+with open('new_10_pred_val_instances.json', 'w') as f:
     f.write(json.dumps(NEW_INSTANCES))
     
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-from graph_tracking.mainVIS_Track import *
-
-DATASET_ = file_reader('pred_test_instances.json')
+DATASET_ = file_reader('new_10_pred_val_instances.json')
 
 ANNOTATIONS = DATASET_['annotations']
 
 CATEGORIES = cfg.CLASS_YTVIS21
 
-##%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #import numpy as np
 #import os
 #PATHS = []
@@ -151,6 +146,5 @@ CATEGORIES = cfg.CLASS_YTVIS21
 ##%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #from moviepy.editor import ImageSequenceClip
 #clip = ImageSequenceClip(images, fps=30)
-#name = "test_set.mp4"
-#clip.write_videofile(name) 
-#    
+#clip.write_videofile("test.mp4",fps=30) 
+    

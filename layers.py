@@ -176,7 +176,7 @@ def yolov4_plus1_decode_graph(input_layer):
     """
     n_2, n_3, n_4, n_5 = input_layer
 
-    PRED_CH = cfg.BBOX_REG + cfg.BBOX_CONF #+ cfg.NUM_CLASSES
+    PRED_CH = cfg.BBOX_REG + cfg.BBOX_CONF
     STACK_PRED_CH = cfg.NUM_ANCHORS * PRED_CH
     
     # level 2
@@ -332,7 +332,7 @@ def mask_graph_AFP(inputs, pool_size =cfg.MASK_POOL_SIZE , mask_conf=cfg.MASK_CO
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(mask_conf, (1, 1), strides=1), name="custom_out")(x)
 #    x = tf.keras.layers.Activation('softmax', name='mrcnn_mask')(x)
 
-    return x
+    return tf.squeeze(x,axis=-1)
 
 
 ############################################################

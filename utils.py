@@ -355,7 +355,7 @@ def draw_bbox(image, box=None, conf=None, class_id=None, mask=None, class_dict=N
                 mm = np.array(Image.new('RGB', (img.shape[1], img.shape[0]), \
                                         color = COLORS[i%len(COLORS)])) * \
                                         np.tile(mm[...,None],(1,1,3))
-                img[mm>0] = img[mm>0]*0.5+mm[mm>0]*0.5
+                img[mm>0] = img[mm>0]*0.3+mm[mm>0]*0.7
     if mode == 'PIL':
         show_image(img)
     else:
@@ -554,7 +554,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
     bg_index = iou_map < cfg.BG_THRESH * tol 
     ign_index = tf.cast(tf.cast(tf.logical_not(fg_index),tf.float32) \
                         * tf.cast(tf.logical_not(bg_index),tf.float32),tf.bool)
-    tconf = tf.where(fg_index, 1.0, tconf)
+    tconf = tf.where(fg_index, iou_map, tconf)
     tconf = tf.where(bg_index, 0.0, tconf)
     tconf = tf.where(ign_index, -1.0, tconf)
     tconf = tconf[...,None]
@@ -569,7 +569,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
 #    tbox = tf.cond(cond, lambda: tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), lambda: tbox)
     tbox = tf.where(fg_index[...,None], tf.scatter_nd(tf.where(fg_index),  delta_target, (nA, nGh, nGw, 4)), tbox)
         
-    label = tf.concat([tbox,tconf,tid,iou_map[...,None]],axis=-1)
+    label = tf.concat([tbox,tconf,tid],axis=-1)#iou_map[...,None]
     # need to transpose since for some reason the labels are rotated, maybe scatter_nd?
     label = tf.transpose(label,(0,2,1,3))
     return label
@@ -577,7 +577,7 @@ def encode_label(target, anchor_wh, nA, nGh, nGw, nC, tol):
 def decode_label(label, anchors, stride):
     label = tf.transpose(label,(0,1,3,2,4)) # decode_delta_map has some issue
     pconf = label[..., 4]
-    pclass = label[..., 5]# Conf
+    pclass = label[..., 5]
     pbox = label[..., :4]
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
@@ -678,11 +678,12 @@ def decode_delta_map(delta_map, anchors):
     
 def decode_prediction(prediction, anchors, stride):
     prediction = tf.transpose(prediction,(0,1,3,2,4)) # decode_delta_map has some issue
-    pconf = prediction[..., 4:6]  # class
-    pconf = tf.nn.softmax(pconf, axis=-1)[...,1:] # class
-    pclass = prediction[..., 6:]  # class
-    pclass = tf.nn.softmax(pclass, axis=-1) # class
+#    pconf = prediction[..., 4:6]  # class
+#    pconf = tf.nn.softmax(pconf, axis=-1)[...,1:] # class
     pbox = prediction[..., :4]
+    pconf = tf.nn.sigmoid(prediction[..., 4])[...,None]
+    pclass = prediction[..., 5:]  # class
+    pclass = tf.nn.softmax(pclass, axis=-1) # class
     pbox = decode_delta_map(pbox, tf.divide(anchors,stride))
     pbox = tf.multiply(pbox,stride) # now in range [0, .... cfg.TRAIN_SIZE]
     pbox = tf.divide(pbox,cfg.TRAIN_SIZE) #now normalized in [0...1]
@@ -738,7 +739,7 @@ def check_proposals_tensor(proposal):
 def nms_proposals(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf =  proposal[...,4] * tf.reduce_max(proposal[...,5:], axis=-1)
+   pconf =  proposal[...,4] #* tf.reduce_max(proposal[...,5:], axis=-1)
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.PRE_NMS_LIMIT, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
@@ -747,12 +748,12 @@ def nms_proposals(proposal):
 def nms_proposals_tensor(proposal):
    # non max suppression
    pboxes = proposal[...,:4]
-   pconf = proposal[...,4] * tf.reduce_max(proposal[...,5:], axis=-1)
+   pconf = proposal[...,4] #* tf.reduce_max(proposal[...,5:], axis=-1)
    indices, _ = tf.image.non_max_suppression_padded(pboxes, pconf, max_output_size=cfg.MAX_PROP, iou_threshold=cfg.NMS_THRESH, pad_to_max_output_size=True)
 
    proposal = tf.gather(proposal, indices, axis=1, batch_dims=1) #b x n rois x (4+1+1+208)
    pbbox = proposal[...,:4]
-   pconf = proposal[...,4:5] * tf.reduce_max(proposal[...,5:], axis=-1)[...,None]
+   pconf = proposal[...,4:5] #* tf.reduce_max(proposal[...,5:], axis=-1)[...,None]
    pclass = tf.cast(tf.argmax(proposal[...,5:],axis=-1),tf.float32)[...,tf.newaxis]
    pclass = tf.add(pclass, 1.) # from [0, num_classes-1] to [1, num_classes]
    proposal = tf.concat([pbbox,pconf,pclass], axis=-1)  # proposal[...,5:]
@@ -815,7 +816,7 @@ def crop_and_resize(proposal_gt_bbox_gt_mask):
     box_indices = tf.range((tf.shape(targets)[0]),dtype=tf.int32)
     target_mask = tf.image.crop_and_resize(target_mask[...,tf.newaxis], proposals_,\
                                            box_indices = box_indices, crop_size=(cfg.MASK_SIZE,cfg.MASK_SIZE),method="bilinear")[...,0]
-    target_mask = tf.round(target_mask)
+#    target_mask = tf.round(target_mask)
     target_mask = tf.clip_by_value(target_mask,0.0,1.0)
     target_mask = tf.scatter_nd(targets[...,tf.newaxis],target_mask,(nP,cfg.MASK_SIZE,cfg.MASK_SIZE))
     return target_mask
@@ -1076,7 +1077,7 @@ class ComputeConfusionMatrix_and_mAP(tf.keras.callbacks.Callback):
             image, gt_masks, gt_bboxes = data
             rpn_predictions, rpn_proposals, mrcnn_mask = self.model.infer(image)
             box, conf, class_id = rpn_proposals[...,:4], rpn_proposals[...,4], rpn_proposals[...,5]
-            mask = tf.nn.softmax(mrcnn_mask,axis=-1)[...,1]
+            mask = tf.nn.sigmoid(mrcnn_mask)#[...,1]
             
             gate = tf.cast(conf>=cfg.CONF_THRESH,tf.float32)
             box = box * tf.tile(gate[...,None],(1,1,4))
