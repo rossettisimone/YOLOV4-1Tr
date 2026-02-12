@@ -15,8 +15,28 @@
 **Team**: Simone Rossetti, Temirlan Zharbynbek, Fiora Pirri — [Alcor LAB](https://sites.google.com/diag.uniroma1.it/alcorlab-diag), Sapienza Università di Roma.  
 **Technical report**: [VIS_10_Rossetti.pdf](VIS_10_Rossetti.pdf) (challenge submission).
 
+---
+
+## Demo — VIS in action
+
+<p align="center">
+  <strong>Detection · Segmentation · Tracking</strong><br>
+  <em>Single-stage pipeline, no first-frame masks</em>
+</p>
+
+<p align="center">
+  <video src="assets/vis_results_combined_under100mb.mp4" controls loop autoplay muted playsinline width="85%"></video>
+</p>
+
+<p align="center">
+  <sub>Combined VIS results · YOLOV4+1Tr on YouTube-VOS 2021</sub>
+</p>
+
+---
+
 ## Quick navigation
 
+- [Demo](#demo--vis-in-action)
 - [What's in the box](#whats-in-the-box)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Method in short](#method-in-short)
@@ -97,6 +117,18 @@ Detection and segmentation are **single-stage** per frame; tracking is done by a
    - Challenge submission weights (e.g. `model.54--7.149.h5`) are available at:  
      [Google Drive](https://drive.google.com/drive/folders/1oN-z71nxx1F4E7kQQKRxDdgNDz60K4g2?usp=sharing).
 
+6. **Overlay tracking results on video** (`scripts/overlay_vis_on_video.py`)
+   - **Correct alignment (recommended)**: use the YouTube-VOS test set so frame order matches the predictions. Download the [test set](https://youtube-vos.org/dataset/) and run:
+     ```bash
+     python scripts/overlay_vis_on_video.py --from-dataset --frames-dir /path/to/YouTubeVIS21/test \
+       --results results_test_new_graph.json --annotations pred_test_instances.json \
+       --all-videos --output vis_results
+     ```
+     `--frames-dir` must be the folder that contains `JPEGImages/` (e.g. the test split root). Frames are loaded in the order given by `num_sequence` in the annotations, so masks and video stay in sync.
+   - **Single video**: `--from-dataset --frames-dir <test_root> --video-id 1 --output vis_results`
+   - **Without the dataset**: you can overlay on a single input video (e.g. `test_set.mp4`) with `--video test_set.mp4`; only the first matching segment will be correct unless your input video was built in the same order as the JSON.
+   - **Combine & shrink**: `scripts/concat_vis_videos.py` concatenates `vis_v*.mp4` into one file; `scripts/shrink_vis_video.py` trims it under 100 MB for GitHub.
+
 ---
 
 ## Results & challenge
@@ -115,19 +147,27 @@ Leaderboard metrics (2021 VIS track) were modest compared to top entries; the ma
 
 ```
 YOLOV4-1Tr/
-├── model.py              # YOLOV4+1 model: backbone, neck, decode, proposals, mask head
-├── backbone.py           # CSPDarknet53 graph + weight loading
-├── layers.py             # FPN (yolov4_plus1_graph), decode, proposal, ROIAlign, mask_graph_AFP
-├── train.py              # Training loop, MirroredStrategy, callbacks
-├── loader_ytvos.py       # YouTube-VIS data loader
-├── associations.py       # Association / tracking helpers
-├── tracker.py            # Tracker logic
-├── new_new_graph_tracking/   # VIS inference & submission (mainVIS_Track4.py, bipartite matching, etc.)
-├── utils.py              # Loss, encoding, NMS, evaluation (e.g. confusion matrix, mAP)
-├── compute_ap.py         # AP computation
-├── info/                 # Anchor files (e.g. anchors_yt_16.txt)
-├── papers/               # References (YOLOV4, PANet, MOTS, etc.)
-├── VIS_10_Rossetti.pdf   # Challenge technical report
+├── model.py                  # YOLOV4+1 model: backbone, neck, decode, proposals, mask head
+├── backbone.py               # CSPDarknet53 graph + weight loading
+├── layers.py                 # FPN, decode, proposal, ROIAlign, mask_graph_AFP
+├── train.py                  # Training loop, MirroredStrategy, callbacks
+├── loader_ytvos.py           # YouTube-VIS data loader
+├── associations.py           # Association / tracking helpers
+├── tracker.py                # Tracker logic
+├── utils.py                  # Loss, encoding, NMS, evaluation (confusion matrix, mAP)
+├── compute_ap.py             # AP computation (used by utils)
+├── new_new_graph_tracking/   # VIS inference & submission (mainVIS_Track4.py, bipartite matching)
+├── scripts/                  # Standalone utilities (see scripts/README.md)
+│   ├── overlay_vis_on_video.py   # Overlay VIS masks on video (from JSON or dataset)
+│   ├── concat_vis_videos.py      # Concatenate vis_v*.mp4 into one video
+│   ├── shrink_vis_video.py      # Trim combined video under 100 MB for GitHub
+│   └── evaluate.py              # YouTube-VOS evaluation (pycocotools)
+├── assets/                   # Demo media (README video, figures)
+│   └── vis_results_combined_under100mb.mp4
+├── info/                     # Anchor files (e.g. anchors_yt_16.txt)
+├── papers/                   # Reference PDFs (YOLOV4, PANet, MOTS, etc.)
+├── old/                      # Legacy code (previous tracking, loaders)
+├── VIS_10_Rossetti.pdf       # Challenge technical report
 └── README.md
 ```
 
