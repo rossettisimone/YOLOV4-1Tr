@@ -16,9 +16,12 @@ images/
 experiments/
 YouTubeVIS21/
 vis_results*/
-# Full combined video (~200MB); use assets/vis_results_combined_under100mb.mp4 in repo
+vis_results_heuristics/
+vis_results_heuristics_combined.mp4
+assets/clips_4fps/
+assets/clips_4fps_heuristics/
+# Full combined video (~200 MB); use assets/vis_results_combined_under100mb.mp4 in repo
 vis_results_combined.mp4
 
 # IDE & notebooks
 .ipynb_checkpoints/
-*.ipynb_checkpoints

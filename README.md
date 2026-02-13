@@ -25,11 +25,11 @@
 </p>
 
 <p align="center">
-  <video src="assets/vis_demo_10mb.mp4" controls loop autoplay muted playsinline width="85%"></video>
+  <img src="assets/vis_demo.gif" alt="VIS demo" width="480" />
 </p>
 
 <p align="center">
-  <sub>VIS demo (~26 s, &lt;10 MB) · YOLOV4+1Tr on YouTube-VOS 2021</sub>
+  <sub>Animated preview · <a href="assets/vis_demo_10mb.mp4"></a> · YOLOV4+1Tr on YouTube-VOS 2021</sub>
 </p>
 
 ---
@@ -160,11 +160,15 @@ YOLOV4-1Tr/
 ├── scripts/                  # Standalone utilities (see scripts/README.md)
 │   ├── overlay_vis_on_video.py   # Overlay VIS masks on video (from JSON or dataset)
 │   ├── concat_vis_videos.py      # Concatenate vis_v*.mp4 into one video
-│   ├── shrink_vis_video.py      # Trim combined video under 100 MB for GitHub
-│   └── evaluate.py              # YouTube-VOS evaluation (pycocotools)
-├── assets/                   # Demo media (README video, figures)
-│   ├── vis_demo_10mb.mp4     # Lightweight demo (&lt;10 MB, used in README)
-│   └── vis_results_combined_under100mb.mp4   # Full first-half (~92 MB)
+│   ├── shrink_vis_video.py      # Trim video by duration or --max-mb (100 / 10)
+│   ├── video_to_gif.py           # Video → GIF for README (inline on GitHub)
+│   ├── split_video_to_clips.py   # Split one video into N clips at given fps
+│   ├── make_clips_from_results.py # Pipeline: overlay JSON → concat → N clips (e.g. heuristics)
+│   └── evaluate.py               # YouTube-VOS evaluation (pycocotools)
+├── assets/                   # Demo media (README, optional clips)
+│   ├── vis_demo.gif              # Animated demo for README (plays inline)
+│   ├── vis_demo_10mb.mp4         # Short demo (&lt;10 MB)
+│   └── vis_results_combined_under100mb.mp4   # First half of combined (~92 MB)
 ├── info/                     # Anchor files (e.g. anchors_yt_16.txt)
 ├── papers/                   # Reference PDFs (YOLOV4, PANet, MOTS, etc.)
 ├── old/                      # Legacy code (previous tracking, loaders)
