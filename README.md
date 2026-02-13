@@ -25,11 +25,11 @@
 </p>
 
 <p align="center">
-  <video src="assets/vis_results_combined_under100mb.mp4" controls loop autoplay muted playsinline width="85%"></video>
+  <video src="assets/vis_demo_10mb.mp4" controls loop autoplay muted playsinline width="85%"></video>
 </p>
 
 <p align="center">
-  <sub>Combined VIS results · YOLOV4+1Tr on YouTube-VOS 2021</sub>
+  <sub>VIS demo (~26 s, &lt;10 MB) · YOLOV4+1Tr on YouTube-VOS 2021</sub>
 </p>
 
 ---
@@ -163,7 +163,8 @@ YOLOV4-1Tr/
 │   ├── shrink_vis_video.py      # Trim combined video under 100 MB for GitHub
 │   └── evaluate.py              # YouTube-VOS evaluation (pycocotools)
 ├── assets/                   # Demo media (README video, figures)
-│   └── vis_results_combined_under100mb.mp4
+│   ├── vis_demo_10mb.mp4     # Lightweight demo (&lt;10 MB, used in README)
+│   └── vis_results_combined_under100mb.mp4   # Full first-half (~92 MB)
 ├── info/                     # Anchor files (e.g. anchors_yt_16.txt)
 ├── papers/                   # Reference PDFs (YOLOV4, PANet, MOTS, etc.)
 ├── old/                      # Legacy code (previous tracking, loaders)

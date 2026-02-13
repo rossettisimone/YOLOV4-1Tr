@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Cut the first half of vis_results_combined.mp4 to get under GitHub's 100 MB limit.
-Uses OpenCV (no ffmpeg required). Output: vis_results_combined_under100mb.mp4
+Cut or trim vis_results_combined.mp4 to stay under a size limit (e.g. GitHub 100 MB or 10 MB).
+Uses OpenCV (no ffmpeg required).
 
-Usage: python shrink_vis_video.py [--input vis_results_combined.mp4] [--output vis_results_combined_under100mb.mp4]
+Usage:
+  python shrink_vis_video.py --max-mb 100   # default: first half, output assets/...under100mb.mp4
+  python shrink_vis_video.py --max-mb 10 -o assets/vis_demo_10mb.mp4
+  python shrink_vis_video.py --fraction 0.5 -o out.mp4
 """
 
 import argparse
@@ -18,16 +21,18 @@ except ImportError:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Cut first half of video for GitHub 100MB limit")
+    parser = argparse.ArgumentParser(description="Trim video to stay under a size limit (e.g. 100 MB or 10 MB)")
     parser.add_argument("--input", "-i", default="vis_results_combined.mp4", help="Input video")
-    parser.add_argument("--output", "-o", default="assets/vis_results_combined_under100mb.mp4", help="Output video (first half)")
-    parser.add_argument("--fraction", "-f", type=float, default=0.5, help="Fraction to keep (default 0.5 = first half)")
+    parser.add_argument("--output", "-o", default=None, help="Output path (default depends on --max-mb)")
+    parser.add_argument("--fraction", "-f", type=float, default=None, help="Fraction of video to keep (e.g. 0.5 = first half)")
+    parser.add_argument("--max-mb", "-m", type=float, default=None, help="Target max size in MB (trim to fit; uses input file size to estimate frames)")
     args = parser.parse_args()
 
     if not os.path.isfile(args.input):
         print("Input not found:", args.input)
         return 1
 
+    input_size_mb = os.path.getsize(args.input) / (1024 * 1024)
     cap = cv2.VideoCapture(args.input)
     if not cap.isOpened():
         print("Could not open:", args.input)
@@ -38,10 +43,28 @@ def main():
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    keep = max(1, int(total * args.fraction))
-    print(f"Input: {args.input} — {total} frames, {fps:.1f} fps, {w}x{h}")
-    print(f"Writing first {keep} frames ({100*args.fraction:.0f}%) -> {args.output}")
+    if args.max_mb is not None:
+        # Estimate frames to keep so output stays under args.max_mb (assume similar bytes/frame)
+        target_mb = args.max_mb * 0.75  # stay safely under (encoding overhead varies)
+        keep = max(1, min(total, int(total * target_mb / input_size_mb)))
+        if args.output is None:
+            args.output = f"assets/vis_results_combined_under{int(args.max_mb)}mb.mp4"
+    elif args.fraction is not None:
+        keep = max(1, int(total * args.fraction))
+        if args.output is None:
+            args.output = "assets/vis_results_combined_under100mb.mp4"
+    else:
+        args.fraction = 0.5
+        keep = max(1, int(total * 0.5))
+        args.output = args.output or "assets/vis_results_combined_under100mb.mp4"
 
+    pct = 100 * keep / total if total else 0
+    print(f"Input: {args.input} — {total} frames, {fps:.1f} fps, {w}x{h} ({input_size_mb:.1f} MB)")
+    print(f"Writing first {keep} frames ({pct:.1f}%) -> {args.output}")
+
+    out_dir = os.path.dirname(args.output)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(args.output, fourcc, fps, (w, h))
     if not out.isOpened():
